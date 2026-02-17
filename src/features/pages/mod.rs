@@ -67,4 +67,3 @@ fn db_page_to_json_page(dbpage: &DbPage, format: &str) -> JsonPage {
         created_datetime: created_datetime,
     }
 }
-
