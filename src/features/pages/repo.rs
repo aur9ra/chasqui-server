@@ -1,138 +1,128 @@
+use crate::features::pages::model::DbPage;
 use anyhow::{Result, anyhow};
-use derive_more::derive::Display;
 use markdown::{self, Options, to_html_with_options};
-use sqlx::types::chrono::{NaiveDate, NaiveDateTime};
+use sqlx::types::chrono::NaiveDateTime;
 use sqlx::{Executor, Pool, Sqlite};
 use std::collections::HashMap;
 use std::path::Path;
 use std::{fs, io};
 use walkdir::WalkDir;
 
-fn default_datetime() -> NaiveDateTime {
-    NaiveDate::from_epoch_days(0)
-        .unwrap()
-        .and_hms_opt(0, 0, 0)
-        .unwrap()
+pub async fn get_entry_by_name(name: &str, pool: &Pool<Sqlite>) -> sqlx::Result<Option<DbPage>> {
+    // here, we use the query_as function (rather than the query macro)
+    sqlx::query_as::<_, DbPage>(
+        r#"
+        SELECT * FROM pages WHERE filename LIKE ?
+        "#,
+    )
+    .bind(name)
+    .fetch_optional(pool)
+    .await
 }
 
-// todo: hash field
-// (won't rebuild files that haven't changed)
-#[derive(sqlx::FromRow, Eq, PartialEq, Clone, Display)]
-#[display("{}", filename)]
-pub struct Page {
-    filename: String,
-    name: Option<String>,
-    html_content: String,
-    tags: Option<String>,
-    modified_datetime: Option<NaiveDateTime>,
-    created_datetime: Option<NaiveDateTime>,
-}
+// when loading from disk, there may not be existing information for the name, tags, etc. in
+// the metadata, so we will ask the user for these fields.
+pub fn new_page(
+    _filename: String,
+    _html_content: String,
+    _md_content: String,
+    _name: Option<String>,
+    _tags: Option<String>,
+    _modified_datetime: Option<NaiveDateTime>,
+    _created_datetime: Option<NaiveDateTime>,
+    ask_user: bool,
+) -> DbPage {
+    // track if we have notified the user of a file that needs input
+    // i.e. "hey, this file {} needs some data"
+    let mut presented_user = false;
+    let mut truncated_html_content = _html_content.clone();
+    truncated_html_content.truncate(100);
 
-impl Page {
-    // when loading from disk, there may not be existing information for the name, tags, etc. in
-    // the metadata, so we will ask the user for these fields.
-
-    // todo: try to get more from OS file metadata before calling this
-    pub fn new(
-        _filename: String,
-        _html_content: String,
-        _name: Option<String>,
-        _tags: Option<String>,
-        _modified_datetime: Option<NaiveDateTime>,
-        _created_datetime: Option<NaiveDateTime>,
-        ask_user: bool,
-    ) -> Page {
-        // track if we have notified the user of a file that needs input
-        // i.e. "hey, this file {} needs some data"
-        let mut presented_user = false;
-        let mut truncated_html_content = _html_content.clone();
-        truncated_html_content.truncate(100);
-
-        let mut present_user_file_if_hasnt = || {
-            if !presented_user {
-                presented_user = true;
-                println!("\nDetected new page ({}).", _filename);
-                println!("Preview:");
-                println!("{}\n", truncated_html_content)
-            }
-        };
-
-        // get the name of the page from the user
-        let name = match _name {
-            Some(val) => Some(val),
-            None => {
-                present_user_file_if_hasnt();
-                if ask_user {
-                    ask_user_stdin_optional("Please provide a name: (or enter for no name)", "")
-                } else {
-                    None
-                }
-            }
-        };
-
-        // get tags, store as serialized json
-        let tags = match _tags {
-            Some(val) => Some(val),
-            None => {
-                if ask_user {
-                    // here's our list of tags we'll serialize
-                    let mut tags: Vec<String> = Vec::new();
-                    const QUIT_STR: &str = "";
-                    println!("Please provide any number of tags.");
-                    // it's true, with the power of serialization, we can handle an arbitrary number of
-                    // tags. let's continually ask the user for some
-                    loop {
-                        let question = format!("Input tag #{} (or enter to stop)", tags.len());
-                        if let Some(tag) = ask_user_stdin_optional(&question, QUIT_STR) {
-                            tags.push(tag);
-                            continue;
-                        } else {
-                            // the user is done adding tags.
-                            break;
-                        }
-                    }
-
-                    match tags.len() {
-                        0 => None,
-                        _ => Some(serde_json::to_string(&tags).unwrap_or("".to_string())),
-                    }
-                } else {
-                    None
-                }
-
-                // todo: more sophisticated measures for a deserialization failure, but it's 4:37
-                // am and i want something working and this match is hideous
-            }
-        };
-
-        // get modified time (optional)
-        // todo implement this
-        let modified_datetime: Option<NaiveDateTime> = match _modified_datetime {
-            Some(val) => Some(val),
-            None => {
-                eprintln!("modified_datetime creation from cli is not yet implemented");
-                None
-            }
-        };
-
-        // get created time (optional)
-        // todo implement this
-        let created_datetime: Option<NaiveDateTime> = match _created_datetime {
-            Some(val) => Some(val),
-            None => {
-                eprintln!("created_datetime creation from cli is not yet implemented");
-                None
-            }
-        };
-
-        Self {
-            filename: _filename,
-            name: name,
-            tags: tags,
-            html_content: _html_content,
-            created_datetime: created_datetime,
-            modified_datetime: modified_datetime,
+    let mut present_user_file_if_hasnt = || {
+        if !presented_user {
+            presented_user = true;
+            println!("\nDetected new page ({}).", _filename);
+            println!("Preview:");
+            println!("{}\n", truncated_html_content)
         }
+    };
+
+    // get the name of the page from the user
+    let name = match _name {
+        Some(val) => Some(val),
+        None => {
+            present_user_file_if_hasnt();
+            if ask_user {
+                ask_user_stdin_optional("Please provide a name: (or enter for no name)", "")
+            } else {
+                None
+            }
+        }
+    };
+
+    // get tags, store as serialized json
+    let tags = match _tags {
+        Some(val) => Some(val),
+        None => {
+            if ask_user {
+                // here's our list of tags we'll serialize
+                let mut tags: Vec<String> = Vec::new();
+                const QUIT_STR: &str = "";
+                println!("Please provide any number of tags.");
+                // it's true, with the power of serialization, we can handle an arbitrary number of
+                // tags. let's continually ask the user for some
+                loop {
+                    let question = format!("Input tag #{} (or enter to stop)", tags.len());
+                    if let Some(tag) = ask_user_stdin_optional(&question, QUIT_STR) {
+                        tags.push(tag);
+                        continue;
+                    } else {
+                        // the user is done adding tags.
+                        break;
+                    }
+                }
+
+                match tags.len() {
+                    0 => None,
+                    _ => Some(serde_json::to_string(&tags).unwrap_or("".to_string())),
+                }
+            } else {
+                None
+            }
+
+            // todo: more sophisticated measures for a deserialization failure, but it's 4:37
+            // am and i want something working and this match is hideous
+        }
+    };
+
+    // get modified time (optional)
+    // todo implement this
+    let modified_datetime: Option<NaiveDateTime> = match _modified_datetime {
+        Some(val) => Some(val),
+        None => {
+            eprintln!("modified_datetime creation from cli is not yet implemented");
+            None
+        }
+    };
+
+    // get created time (optional)
+    // todo implement this
+    let created_datetime: Option<NaiveDateTime> = match _created_datetime {
+        Some(val) => Some(val),
+        None => {
+            eprintln!("created_datetime creation from cli is not yet implemented");
+            None
+        }
+    };
+
+    DbPage {
+        filename: _filename,
+        name: name,
+        tags: tags,
+        html_content: _html_content,
+        md_content: _md_content,
+        created_datetime: created_datetime,
+        modified_datetime: modified_datetime,
     }
 }
 
@@ -167,54 +157,25 @@ fn ask_user_stdin(question: &impl std::fmt::Display) -> String {
     }
 }
 
-// before we do any ops with the db, we need to make sure we have got a pages table
-pub async fn init_db_check(pool: &Pool<Sqlite>) -> sqlx::Result<()> {
-    let status = pool
-        .fetch_one(sqlx::query(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='pages'",
-        ))
-        .await;
-
-    let table_exists: bool = status.is_ok();
-
-    if !table_exists {
-        let table_execute_status = pool
-            .execute(sqlx::query(
-                "CREATE TABLE IF NOT EXISTS pages (
-                    filename            TEXT NOT NULL UNIQUE PRIMARY KEY,
-                    name                TEXT,
-                    html_content        TEXT NOT NULL,
-                    tags                TEXT,
-                    modified_datetime   INTEGER,
-                    created_datetime    INTEGER
-                     )",
-            ))
-            .await;
-
-        match table_execute_status {
-            Ok(_) => println!("Successfully created 'pages' in db."),
-            Err(e) => eprintln!("Failed to create 'pages' in db: {}", e),
-        }
-    }
-    Ok(())
-}
-
-pub async fn get_pages_from_db(pool: &Pool<Sqlite>) -> sqlx::Result<Vec<Page>> {
-    let get_pages_status = sqlx::query_as!(Page, r#"SELECT 
+pub async fn get_pages_from_db(pool: &Pool<Sqlite>) -> sqlx::Result<Vec<DbPage>> {
+    let get_pages_status = sqlx::query_as!(DbPage, r#"SELECT 
                                                         filename,
                                                         name,
                                                         html_content,
+                                                        md_content,
                                                         tags,
                                                         modified_datetime as "modified_datetime: NaiveDateTime",
                                                         created_datetime as "created_datetime: NaiveDateTime"
                                                     FROM pages"#).fetch_all(pool).await?;
-
     Ok(get_pages_status)
 }
 
-pub fn process_md_dir(md_path: &Path, pages_from_db: Vec<&Page>) -> Result<Vec<Page>> {
-    println!("HashMap length: {}", pages_from_db.len());
-    let mut pages: Vec<Page> = Vec::new();
+// iterate over the files at md_path.
+// for each file, as well as the file's corresponding entry in the database,
+// this function determines what page info should make it to the database.
+pub fn process_md_dir(md_path: &Path, pages_from_db: Vec<&DbPage>) -> Result<Vec<DbPage>> {
+    let md_location_prefix = Path::new("./content/md/");
+    let mut pages: Vec<DbPage> = Vec::new();
 
     let pages_from_db_hashmap = pages_to_hashmap(pages_from_db);
 
@@ -235,7 +196,12 @@ pub fn process_md_dir(md_path: &Path, pages_from_db: Vec<&Page>) -> Result<Vec<P
             Err(_) => continue,
         };
 
-        let filename = entry.path().to_str().unwrap();
+        let filename = entry
+            .path()
+            .strip_prefix(md_location_prefix)
+            .unwrap()
+            .to_str()
+            .unwrap();
 
         println!("== Processing {} ==", entry.path().display());
 
@@ -267,7 +233,8 @@ pub fn process_md_dir(md_path: &Path, pages_from_db: Vec<&Page>) -> Result<Vec<P
         let created_from_metadata =
             get_property_from_metadata(&metadata, &MetadataDateTimeOptions::Created).ok();
 
-        // transform markdown to html
+        // transform markdown to html (for me, astro should take care of this, but what if the front-end
+        // doesn't)
         let html_content = match to_html_with_options(&md_content, &Options::gfm()) {
             Ok(val) => val,
             Err(e) => {
@@ -294,9 +261,10 @@ pub fn process_md_dir(md_path: &Path, pages_from_db: Vec<&Page>) -> Result<Vec<P
         // Page constructor to ask the user IF there was no corresponding page in the db
         // (this is a new file in the directory)
         // if it is in the db, the null value is likely intentional
-        let file: Page = Page::new(
+        let file: DbPage = new_page(
             filename.to_string(),
             html_content,
+            md_content,
             name,
             tags,
             modified_from_metadata,
@@ -310,8 +278,8 @@ pub fn process_md_dir(md_path: &Path, pages_from_db: Vec<&Page>) -> Result<Vec<P
     Ok(pages)
 }
 
-pub fn pages_to_hashmap(pages: Vec<&Page>) -> HashMap<&String, Page> {
-    let mut h: HashMap<&String, Page> = HashMap::new();
+pub fn pages_to_hashmap(pages: Vec<&DbPage>) -> HashMap<&String, DbPage> {
+    let mut h: HashMap<&String, DbPage> = HashMap::new();
     for page in pages {
         h.insert(&page.filename, page.clone());
     }
@@ -320,8 +288,8 @@ pub fn pages_to_hashmap(pages: Vec<&Page>) -> HashMap<&String, Page> {
 
 pub async fn insert_from_vec_pages(
     pool: &Pool<Sqlite>,
-    files_pages: Vec<&Page>,
-    db_pages: Vec<&Page>,
+    files_pages: Vec<&DbPage>,
+    db_pages: Vec<&DbPage>,
 ) {
     // we want to be able to easily retrieve info from the db pages
     let db_hashmap = pages_to_hashmap(db_pages);
@@ -346,6 +314,7 @@ pub async fn insert_from_vec_pages(
                         SET
                             name = ?,
                             html_content = ?,
+                            md_content = ?,
                             tags = ?,
                             modified_datetime = ?,
                             created_datetime = ?
@@ -353,6 +322,7 @@ pub async fn insert_from_vec_pages(
                         "#,
                         file_page.name,
                         file_page.html_content,
+                        file_page.md_content,
                         file_page.tags,
                         file_page.modified_datetime,
                         file_page.created_datetime,
@@ -380,15 +350,17 @@ pub async fn insert_from_vec_pages(
                     filename,
                     name,
                     html_content,
+                    md_content,
                     tags,
                     modified_datetime,
                     created_datetime
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 "#,
                     file_page.filename,
                     file_page.name,
                     file_page.html_content,
+                    file_page.md_content,
                     file_page.tags,
                     file_page.modified_datetime,
                     file_page.created_datetime
@@ -408,12 +380,8 @@ pub async fn insert_from_vec_pages(
     }
 }
 
-const DEFAULT_PAGE_NAME: &str = "";
-const DEFAULT_PAGE_TAGS: &str = "";
-
 enum MetadataDateTimeOptions {
     Modified,
-    Accessed,
     Created,
 }
 
@@ -423,13 +391,12 @@ fn get_property_from_metadata(
 ) -> Result<NaiveDateTime> {
     let systime = match options {
         MetadataDateTimeOptions::Modified => metadata.modified(),
-        MetadataDateTimeOptions::Accessed => metadata.accessed(),
         MetadataDateTimeOptions::Created => metadata.created(),
     };
 
     let cleaned_systime = match systime {
         Ok(val) => val,
-        Err(e) => return Err(anyhow!("Failed to get time from metadata")),
+        Err(e) => return Err(anyhow!("Failed to get time from metadata: {}", e)),
     };
 
     let modified_datetime = match system_time_to_chrono(&cleaned_systime) {

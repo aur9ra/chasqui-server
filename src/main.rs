@@ -1,16 +1,14 @@
+use crate::features::pages::model::{DbPage, JsonPage};
+use crate::features::pages::repo::{get_pages_from_db, insert_from_vec_pages, process_md_dir};
 use anyhow::{Result, anyhow};
 use axum::{Router, routing::get};
 use dotenv;
 use sqlx::Sqlite;
 use sqlx::migrate::MigrateDatabase;
 use sqlx::sqlite::SqlitePoolOptions;
-use std::collections::HashMap;
 use std::{env::var, path::Path};
 
-use crate::pages::{Page, get_pages_from_db, insert_from_vec_pages};
-
-mod db;
-mod pages;
+mod features;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -38,7 +36,6 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // connect to our db
-
     let pool = match SqlitePoolOptions::new()
         .max_connections(15)
         .connect(db_url_str)
@@ -50,18 +47,33 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    sqlx::migrate!()
+        .run(&pool)
+        .await
+        .expect("Failed to run database migrations.");
+
+    // init pages, sync with db
     let md_path = Path::new("./content/md");
-    pages::init_db_check(&pool).await;
     let db_pages = get_pages_from_db(&pool).await.unwrap();
-    let borrowable_db_pages: Vec<&Page> = db_pages.iter().collect();
-    println!("retrieved {} pages from db", db_pages.len());
-    let files_pages = pages::process_md_dir(md_path, borrowable_db_pages.clone()).unwrap();
+    let borrowable_db_pages: Vec<&DbPage> = db_pages.iter().collect();
+    let files_pages = process_md_dir(md_path, borrowable_db_pages.clone()).unwrap();
     insert_from_vec_pages(
         &pool,
         files_pages.iter().collect(),
         borrowable_db_pages.clone(),
     )
     .await;
+
+    println!("Sync complete. Starting server...");
+
+    let app = Router::new()
+        .merge(features::pages::router())
+        .with_state(pool);
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
+    println!("Server listening on http://127.0.0.1:3000");
+
+    axum::serve(listener, app).await?;
 
     Ok(())
 }
