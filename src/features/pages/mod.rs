@@ -14,13 +14,27 @@ pub fn router() -> Router<Pool<Sqlite>> {
     Router::new()
         .route("/pages/{slug}", get(get_page_handler))
         .route("/pages", get(list_pages_handler))
+        .route("/", get(default_page_handler))
+}
+
+async fn default_page_handler(
+    State(pool): State<Pool<Sqlite>>,
+) -> Result<Json<model::JsonPage>, StatusCode> {
+    const DEFAULT_PAGE: &str = "index";
+    let page_option = repo::get_entry_by_name(DEFAULT_PAGE, &pool).await;
+    match page_option {
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+
+        Ok(None) => Err(StatusCode::NOT_FOUND),
+
+        Ok(Some(page)) => Ok(Json(db_page_to_json_page(&page, "%Y-%m-%d %H:%M:%S"))), // Ok(Json(page))
+    }
 }
 
 async fn get_page_handler(
     State(pool): State<Pool<Sqlite>>,
     Path(slug): Path<String>,
 ) -> Result<Json<model::JsonPage>, StatusCode> {
-    println!("{}", slug);
     let page_option = repo::get_entry_by_name(&slug, &pool).await;
 
     match page_option {

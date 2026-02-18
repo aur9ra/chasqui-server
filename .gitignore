@@ -2,3 +2,4 @@
 /content
 tar.sh
 *.tar
+.env

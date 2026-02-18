@@ -9,13 +9,19 @@ use std::{fs, io};
 use walkdir::WalkDir;
 
 pub async fn get_entry_by_name(name: &str, pool: &Pool<Sqlite>) -> sqlx::Result<Option<DbPage>> {
+    let supply_default_entry: bool = true;
+    let default_name: &str = "index.md";
+    let supplied_name = match supply_default_entry && name.is_empty() {
+        true => default_name,
+        false => name,
+    };
     // here, we use the query_as function (rather than the query macro)
     sqlx::query_as::<_, DbPage>(
         r#"
         SELECT * FROM pages WHERE filename LIKE ?
         "#,
     )
-    .bind(name)
+    .bind(supplied_name)
     .fetch_optional(pool)
     .await
 }
@@ -174,10 +180,15 @@ pub async fn get_pages_from_db(pool: &Pool<Sqlite>) -> sqlx::Result<Vec<DbPage>>
 // for each file, as well as the file's corresponding entry in the database,
 // this function determines what page info should make it to the database.
 pub fn process_md_dir(md_path: &Path, pages_from_db: Vec<&DbPage>) -> Result<Vec<DbPage>> {
+    // todo!("Process pages in db that aren't in folder (drop this file?)");
     let md_location_prefix = Path::new("./content/md/");
     let mut pages: Vec<DbPage> = Vec::new();
 
     let pages_from_db_hashmap = pages_to_hashmap(pages_from_db);
+
+    let include_ext = std::env::var("FILENAME_INCLUDE_EXTENSION")
+        .map(|v| v == "true")
+        .unwrap_or(false);
 
     for result_entry in WalkDir::new(md_path) {
         let entry = match result_entry {
@@ -196,12 +207,21 @@ pub fn process_md_dir(md_path: &Path, pages_from_db: Vec<&DbPage>) -> Result<Vec
             Err(_) => continue,
         };
 
-        let filename = entry
+        let relative_path = entry
             .path()
             .strip_prefix(md_location_prefix)
-            .unwrap()
-            .to_str()
-            .unwrap();
+            .unwrap_or(entry.path());
+
+        // todo: add config options to change how filename is generated
+        const filename_include_expression: bool = false;
+        let filename: String = if include_ext {
+            relative_path.to_string_lossy().to_string()
+        } else {
+            relative_path
+                .with_extension("")
+                .to_string_lossy()
+                .to_string()
+        };
 
         println!("== Processing {} ==", entry.path().display());
 
