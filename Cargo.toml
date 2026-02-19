@@ -21,3 +21,4 @@ sqlx = { version = "=0.8.6", features = [
 ] }
 tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread"] }
 walkdir = "2.5.0"
+xxhash-rust = { version = "0.8.15", features = ["xxh3"] }

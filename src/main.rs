@@ -1,5 +1,5 @@
 use crate::features::pages::model::{DbPage, JsonPage};
-use crate::features::pages::repo::{get_pages_from_db, insert_from_vec_pages, process_md_dir};
+use crate::features::pages::repo::{get_pages_from_db, process_md_dir, push_pages_to_db};
 use anyhow::{Result, anyhow};
 use axum::{Router, routing::get};
 use dotenv;
@@ -57,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
     let db_pages = get_pages_from_db(&pool).await.unwrap();
     let borrowable_db_pages: Vec<&DbPage> = db_pages.iter().collect();
     let files_pages = process_md_dir(md_path, borrowable_db_pages.clone()).unwrap();
-    insert_from_vec_pages(
+    push_pages_to_db(
         &pool,
         files_pages.iter().collect(),
         borrowable_db_pages.clone(),
