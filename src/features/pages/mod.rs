@@ -9,6 +9,7 @@ use axum::{
 };
 use model::{DbPage, JsonPage};
 use sqlx::{Pool, Sqlite};
+use std::env::var;
 
 pub fn router() -> Router<Pool<Sqlite>> {
     Router::new()
@@ -20,8 +21,19 @@ pub fn router() -> Router<Pool<Sqlite>> {
 async fn default_page_handler(
     State(pool): State<Pool<Sqlite>>,
 ) -> Result<Json<model::JsonPage>, StatusCode> {
-    const DEFAULT_PAGE: &str = "index";
-    let page_option = repo::get_entry_by_name(DEFAULT_PAGE, &pool).await;
+    // determine default handling through environment variables
+    let handle_default = var("ROUTER_SERVE_HOME_AT_DEFAULT")
+        .ok()
+        .and_then(|val| val.parse::<bool>().ok())
+        .unwrap_or(false);
+
+    if !handle_default {
+        return Err(StatusCode::NOT_FOUND); // should I use another status code?
+    }
+
+    let default_identifier = var("HOME_IDENTIFIER").unwrap_or(String::from("index.md"));
+
+    let page_option = repo::get_entry_by_identifier(default_identifier.as_str(), &pool).await;
     match page_option {
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
 
@@ -35,7 +47,7 @@ async fn get_page_handler(
     State(pool): State<Pool<Sqlite>>,
     Path(slug): Path<String>,
 ) -> Result<Json<model::JsonPage>, StatusCode> {
-    let page_option = repo::get_entry_by_name(&slug, &pool).await;
+    let page_option = repo::get_entry_by_identifier(&slug, &pool).await;
 
     match page_option {
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
@@ -72,7 +84,7 @@ fn db_page_to_json_page(dbpage: &DbPage, format: &str) -> JsonPage {
     };
 
     JsonPage {
-        identifier: dbpage.filename.to_owned(),
+        identifier: dbpage.identifier.to_owned(),
         filename: dbpage.filename.to_owned(),
         name: dbpage.name.to_owned(),
         html_content: dbpage.html_content.to_owned(),

@@ -1,7 +1,6 @@
-use crate::features::pages::model::{DbPage, JsonPage};
+use crate::features::pages::model::DbPage;
 use crate::features::pages::repo::{get_pages_from_db, process_md_dir, process_page_operations};
-use anyhow::{Result, anyhow};
-use axum::{Router, routing::get};
+use axum::Router;
 use dotenv;
 use sqlx::Sqlite;
 use sqlx::migrate::MigrateDatabase;
@@ -15,13 +14,15 @@ async fn main() -> anyhow::Result<()> {
     // determine environment variables
     dotenv::dotenv().ok();
 
-    let db_url = match var("DATABASE_URL") {
-        Ok(val) => val,
-        Err(e) => {
-            panic!("Failed to determine database_url from env: {}", e);
-        }
-    };
+    // init environment variables
+    let db_url =
+        var("DATABASE_URL").expect("Failed to determine DATABASE_URL from environment variables");
     let db_url_str = db_url.as_str();
+
+    let max_connections = var("MAX_CONNECTIONS")
+        .ok()
+        .and_then(|val| val.parse::<u32>().ok())
+        .unwrap_or(15);
 
     // verify db exists
     if !Sqlite::database_exists(db_url_str).await.unwrap_or(false) {
@@ -37,7 +38,7 @@ async fn main() -> anyhow::Result<()> {
 
     // connect to our db
     let pool = match SqlitePoolOptions::new()
-        .max_connections(15)
+        .max_connections(max_connections)
         .connect(db_url_str)
         .await
     {
