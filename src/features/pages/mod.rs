@@ -72,10 +72,12 @@ fn db_page_to_json_page(dbpage: &DbPage, format: &str) -> JsonPage {
     };
 
     JsonPage {
+        identifier: dbpage.filename.to_owned(),
         filename: dbpage.filename.to_owned(),
         name: dbpage.name.to_owned(),
         html_content: dbpage.html_content.to_owned(),
         md_content: dbpage.md_content.to_owned(),
+        md_content_hash: dbpage.md_content_hash.to_owned(),
         tags: dbpage.tags.to_owned(),
         modified_datetime: modified_datetime,
         created_datetime: created_datetime,

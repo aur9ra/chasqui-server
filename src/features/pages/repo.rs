@@ -255,101 +255,91 @@ pub fn pages_to_hashmap(pages: Vec<&DbPage>) -> HashMap<&String, DbPage> {
     h
 }
 
-// TODO: Overhaul push_pages_to_db to execute over a Vec<(DbPage, DbOperationReport)>. This logic
-// is garbage.
-pub async fn push_pages_to_db(
+pub async fn process_page_operations(
     pool: &Pool<Sqlite>,
-    file_pages: Vec<&DbPage>,
-    db_pages: Vec<&DbPage>,
-) {
-    // we want to be able to easily retrieve info from the db pages
-    let db_hashmap = pages_to_hashmap(db_pages);
-
-    for file_page in file_pages {
-        // is a version of this page in the database?
-        let db_page_option = db_hashmap.get(&file_page.filename);
-
-        match db_page_option {
-            // yes, there is a version of this page in the db.
-            Some(db_page) => {
-                let db_page_owned = db_page.to_owned();
-                // are they the same? TODO: update with hash
-                if *file_page == db_page_owned {
-                    // yes, they are the same.
-                    continue;
-                } else {
-                    // no, they are not the same.
-                    // update the database accordingly.. todo
-                    let query = sqlx::query!(
-                        r#"
-                        UPDATE pages
-                        SET
-                            name = ?,
-                            html_content = ?,
-                            md_content = ?,
-                            tags = ?,
-                            modified_datetime = ?,
-                            created_datetime = ?
-                        WHERE filename = ?
-                        "#,
-                        file_page.name,
-                        file_page.html_content,
-                        file_page.md_content,
-                        file_page.tags,
-                        file_page.modified_datetime,
-                        file_page.created_datetime,
-                        file_page.filename,
-                    );
-
-                    let update_status = pool.execute(query).await;
-                    match update_status {
-                        Ok(_) => {
-                            println!("Successfully updated {} in db.", file_page.filename);
-                        }
-                        Err(e) => {
-                            println!("Failed to update {} in db: {}", file_page.filename, e);
-                        }
-                    }
-                }
-            }
-            None => {
-                // no, there is not a version of this page in the db.
-
-                // create query to insert this page into the db
-                let query = sqlx::query!(
+    page_operations: Vec<(DbPage, DbOperationReport)>,
+) -> sqlx::Result<()> {
+    for (db_page, operation) in page_operations {
+        match operation {
+            DbOperationReport::Insert => {
+                sqlx::query!(
                     r#"
-                INSERT INTO pages (
-                    filename,
-                    name,
-                    html_content,
-                    md_content,
-                    tags,
-                    modified_datetime,
-                    created_datetime
+                    INSERT INTO pages (
+                        identifier,
+                        filename,
+                        name,
+                        html_content,
+                        md_content,
+                        md_content_hash,
+                        tags,
+                        modified_datetime,
+                        created_datetime
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    "#,
+                    db_page.identifier,
+                    db_page.filename,
+                    db_page.name,
+                    db_page.html_content,
+                    db_page.md_content,
+                    db_page.md_content_hash,
+                    db_page.tags,
+                    db_page.modified_datetime,
+                    db_page.created_datetime
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                "#,
-                    file_page.filename,
-                    file_page.name,
-                    file_page.html_content,
-                    file_page.md_content,
-                    file_page.tags,
-                    file_page.modified_datetime,
-                    file_page.created_datetime
-                );
+                .execute(pool)
+                .await?;
 
-                let insert_status = pool.execute(query).await;
-                match insert_status {
-                    Ok(_) => {
-                        println!("Successfully pushed {} to db.", file_page.filename);
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to push {} to db: {}", file_page.filename, e);
-                    }
-                }
+                println!("Successfully inserted {} into db.", db_page.filename);
             }
-        }
+            DbOperationReport::Update => {
+                sqlx::query!(
+                    r#"
+                    UPDATE pages
+                    SET
+                        identifier = ?,
+                        name = ?,
+                        html_content = ?,
+                        md_content = ?,
+                        md_content_hash = ?,
+                        tags = ?,
+                        modified_datetime = ?,
+                        created_datetime = ?
+                    WHERE filename = ?
+                    "#,
+                    db_page.identifier,
+                    db_page.name,
+                    db_page.html_content,
+                    db_page.md_content,
+                    db_page.md_content_hash,
+                    db_page.tags,
+                    db_page.modified_datetime,
+                    db_page.created_datetime,
+                    db_page.filename
+                )
+                .execute(pool)
+                .await?;
+
+                println!("Successfully updated {} in db.", db_page.filename);
+            }
+            DbOperationReport::Delete => {
+                sqlx::query!(
+                    r#"
+                    DELETE FROM pages WHERE filename = ?
+                    "#,
+                    db_page.filename
+                )
+                .execute(pool)
+                .await?;
+
+                println!("Successfully deleted {} from db.", db_page.filename);
+            }
+            DbOperationReport::NoChange => {
+                // Do nothing
+            }
+        };
     }
+    Ok(())
 }
 
 enum MetadataDateTimeOptions {

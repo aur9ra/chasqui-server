@@ -1,5 +1,5 @@
 use crate::features::pages::model::{DbPage, JsonPage};
-use crate::features::pages::repo::{get_pages_from_db, process_md_dir, push_pages_to_db};
+use crate::features::pages::repo::{get_pages_from_db, process_md_dir, process_page_operations};
 use anyhow::{Result, anyhow};
 use axum::{Router, routing::get};
 use dotenv;
@@ -47,6 +47,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    // run migrations
     sqlx::migrate!()
         .run(&pool)
         .await
@@ -54,15 +55,18 @@ async fn main() -> anyhow::Result<()> {
 
     // init pages, sync with db
     let md_path = Path::new("./content/md");
+
+    // get current pages in db
     let db_pages = get_pages_from_db(&pool).await.unwrap();
     let borrowable_db_pages: Vec<&DbPage> = db_pages.iter().collect();
-    let files_pages = process_md_dir(md_path, borrowable_db_pages.clone()).unwrap();
-    push_pages_to_db(
-        &pool,
-        files_pages.iter().collect(),
-        borrowable_db_pages.clone(),
-    )
-    .await;
+
+    // scan the directory and determine what needs to be inserted/updated/deleted
+    let page_operations = process_md_dir(md_path, borrowable_db_pages).unwrap();
+
+    // execute the database operations
+    process_page_operations(&pool, page_operations)
+        .await
+        .unwrap();
 
     println!("Sync complete. Starting server...");
 
