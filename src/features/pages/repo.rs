@@ -91,6 +91,16 @@ pub fn process_md_dir(
             Err(_) => continue,
         };
 
+        // skip anything that isn't a file
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        // work with only markdown files (for now)
+        if entry.path().extension().and_then(|s| s.to_str()) != Some("md") {
+            continue;
+        }
+
         let operation_report = process_dir_entry(&entry, &db_pages_map);
         match operation_report {
             Ok(page_report) => {
@@ -118,13 +128,9 @@ fn process_dir_entry(
     let md_content = match fs::read_to_string(&entry.path()) {
         Ok(content) => content,
 
-        // this error isn't actually important, it just means
-        // this isn't a file
+        // unable to read file
         Err(e) => {
-            return Err(anyhow!(
-                "Entry {} is not a readable file",
-                &entry.path().display()
-            ));
+            return Err(anyhow!("Unable to read file: {}", &entry.path().display()));
         }
     };
     let path = entry.path();
