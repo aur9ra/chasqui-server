@@ -7,7 +7,7 @@ use sqlx::types::chrono::NaiveDateTime;
 use sqlx::{Pool, Sqlite};
 use std::collections::HashMap;
 use std::path::Path;
-use std::{env, fs, io};
+use std::{env, fs};
 use walkdir::{DirEntry, WalkDir};
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -32,37 +32,6 @@ pub async fn get_entry_by_identifier(
     .bind(identifier)
     .fetch_optional(pool)
     .await
-}
-
-// ask the user for input through the stdin
-// return Some(input) if input != stop_str, otherwise None
-fn ask_user_stdin_optional(question: &str, stop_str: &str) -> Option<String> {
-    let user_input = ask_user_stdin(&question);
-    match user_input == stop_str {
-        true => None,
-        false => Some(user_input),
-    }
-}
-
-// ask the user for input through the stdin
-// if something goes wrong, continue to ask
-fn ask_user_stdin(question: &impl std::fmt::Display) -> String {
-    let stdin = io::stdin();
-    println!("{}", question);
-
-    let input = &mut String::new();
-
-    loop {
-        match stdin.read_line(input) {
-            Ok(_) => return input.trim_matches(char::is_control).to_owned(),
-            // was there somehow an error reading from stdin?
-            Err(e) => {
-                eprintln!("Failed to read stdin. Error: {}", e);
-                input.clear();
-                continue;
-            }
-        }
-    }
 }
 
 pub async fn get_pages_from_db(pool: &Pool<Sqlite>) -> sqlx::Result<Vec<DbPage>> {
@@ -113,7 +82,9 @@ pub fn process_md_dir(
             Ok(page_report) => {
                 page_operations.push(page_report);
             }
-            Err(e) => return Err(anyhow!("Error occurred processing page: {}", e)),
+            Err(e) => {
+                eprintln!("Error occurred processing page: {}", e);
+            }
         };
     }
 
@@ -137,7 +108,11 @@ fn process_dir_entry(
 
         // unable to read file
         Err(e) => {
-            return Err(anyhow!("Unable to read file: {}", &entry.path().display()));
+            return Err(anyhow!(
+                "Unable to read file {}: {}",
+                &entry.path().display(),
+                e
+            ));
         }
     };
 
@@ -241,8 +216,8 @@ fn process_dir_entry(
                 md_content: parsed_matter.content,
                 md_content_hash: file_md_content_hash,
                 tags: tags,
-                modified_datetime: os_modified,
-                created_datetime: os_created,
+                modified_datetime: final_modified_datetime,
+                created_datetime: final_created_datetime,
             },
             DbOperationReport::Update,
         ));
@@ -258,8 +233,8 @@ fn process_dir_entry(
                 md_content: parsed_matter.content,
                 md_content_hash: file_md_content_hash,
                 tags: tags,
-                modified_datetime: os_modified,
-                created_datetime: os_created,
+                modified_datetime: final_modified_datetime,
+                created_datetime: final_created_datetime,
             },
             DbOperationReport::Insert,
         ));

@@ -1,0 +1,27 @@
+   Compiling chasqui-server v0.1.0 (/mnt/4tb/dev/chasqui-server)
+error[E0282]: type annotations needed for `&_`
+   --> src/features/pages/repo.rs:161:15
+    |
+161 |         .map(|data| data.deserialize().unwrap_or_default())
+    |               ^^^^       ----------- type must be known at this point
+    |
+help: consider giving this closure parameter an explicit type, where the placeholders `_` are specified
+    |
+161 |         .map(|data: &T| data.deserialize().unwrap_or_default())
+    |                   ++++
+
+error[E0277]: the `?` operator can only be used on `Result`s, not `Option`s, in a function that returns `Result`
+   --> src/features/pages/repo.rs:426:40
+    |
+421 | / fn get_property_from_metadata(
+422 | |     metadata_result: &Result<fs::Metadata>,
+423 | |     options: &MetadataDateTimeOptions,
+424 | | ) -> Result<NaiveDateTime> {
+    | |__________________________- this function returns a `Result`
+425 |       // depending on user's provided options, attempt to get modified/created data from metadata
+426 |       let metadata = metadata_result.ok()?;
+    |                                          ^ use `.ok_or(...)?` to provide an error compatible with `Result<NaiveDateTime, anyhow::Error>`
+
+Some errors have detailed explanations: E0277, E0282.
+For more information about an error, try `rustc --explain E0277`.
+error: could not compile `chasqui-server` (bin "chasqui-server") due to 2 previous errors
