@@ -10,7 +10,9 @@ chrono = "0.4.42"
 derive_more = { version = "2.1.0", features = ["display"] }
 dotenv = "0.15.0"
 gray_matter = "0.3.2"
+notify = "8.2.0"
 pulldown-cmark = "0.13.0"
+reqwest = { version = "0.13.2", features = ["json"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 sqlx = { version = "=0.8.6", features = [
