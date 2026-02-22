@@ -6,7 +6,7 @@ use sqlx::Sqlite;
 use sqlx::migrate::MigrateDatabase;
 use sqlx::sqlite::SqlitePoolOptions;
 use std::{env::var, path::Path};
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
 
 mod features;
 

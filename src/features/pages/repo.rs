@@ -1,7 +1,7 @@
 use crate::features::pages::model::{DbOperationReport, DbPage};
 use anyhow::{Result, anyhow};
 use gray_matter::{Matter, ParsedEntity, engine::YAML};
-use markdown::{self, Options, to_html_with_options};
+use pulldown_cmark::{Event, Options as CmarkOptions, Parser, Tag, html};
 use serde::Deserialize;
 use sqlx::types::chrono::NaiveDateTime;
 use sqlx::{Pool, Sqlite};
@@ -96,6 +96,8 @@ pub fn process_md_dir(
 
 // process a directory entry, identify if it's a page, and identify necessary action
 // additionally, report which db operation is appropriate (single responsibility)
+// returns error if unable to read file, unable to process frontmatter, or any links to other pages are broken
+//  TODO: break this function down! this is huge
 fn process_dir_entry(
     entry: &DirEntry,
     db_pages: &HashMap<&String, DbPage>,
@@ -189,17 +191,68 @@ fn process_dir_entry(
     let final_modified_datetime = resolve_datetime(frontmatter.modified_datetime, os_modified);
     let final_created_datetime = resolve_datetime(frontmatter.created_datetime, os_created);
 
-    // md -> html (critical: use parsed_matter, as md_content includes yaml)
-    let html_content = match to_html_with_options(&parsed_matter.content, &Options::gfm()) {
-        Ok(html) => html,
-        Err(e) => {
-            return Err(anyhow!(
-                "Failed to convert md to html. Error details: {}",
-                e
-            ));
-        }
-    };
+    // AST validation and HTML generation
+    let mut options = CmarkOptions::empty();
+    options.insert(CmarkOptions::ENABLE_STRIKETHROUGH);
+    options.insert(CmarkOptions::ENABLE_TABLES);
 
+    let parser = Parser::new_ext(&parsed_matter.content, options);
+
+    let mut rewrote_events = Vec::new();
+    let mut has_broken_link = false;
+    let mut error_message = String::new();
+
+    // iterate over the event stream
+    for event in parser {
+        match event {
+            // in the event of seeing a link...
+            Event::Start(Tag::Link {
+                link_type,
+                dest_url,
+                title,
+                id,
+            }) => {
+                let dest_str = dest_url.to_string();
+
+                // Pass it to our validator
+                match validate_and_rewrite_link(&entry.path(), &dest_str) {
+                    Ok(new_dest) => {
+                        // push the rewritten link back onto the ast tree
+                        rewrote_events.push(Event::Start(Tag::Link {
+                            link_type,
+                            dest_url: new_dest.into(),
+                            title,
+                            id,
+                        }));
+                    }
+                    Err(e) => {
+                        has_broken_link = true;
+                        error_message = format!("In {}: {}", filename, e);
+                        // push the original event so the compiler doesn't crash
+                        rewrote_events.push(Event::Start(Tag::Link {
+                            link_type,
+                            dest_url,
+                            title,
+                            id,
+                        }));
+                    }
+                }
+            }
+            // all other events pass through untouched
+            _ => rewrote_events.push(event),
+        }
+    }
+
+    // halt ingestion if a broken link was found
+    if has_broken_link {
+        return Err(anyhow!("{}", error_message));
+    }
+
+    // compile the modified event stream into an HTML string
+    let mut html_content = String::new();
+    html::push_html(&mut html_content, rewrote_events.into_iter());
+
+    // finally, determine which operation must be made for this page on the db
     if let Some(db_page) = db_page_opt {
         // UPDATING EXISTING PAGE IN DB
 
@@ -355,6 +408,76 @@ pub async fn process_page_operations(
         };
     }
     Ok(())
+}
+
+fn validate_and_rewrite_link(current_file_path: &Path, dest: &str) -> Result<String> {
+    // ignore external links and anchor links
+    if dest.starts_with("http://")
+        || dest.starts_with("https://")
+        || dest.starts_with("mailto:")
+        || dest.starts_with('#')
+    {
+        return Ok(dest.to_string());
+    }
+
+    // strip any query parameters or fragments (e.g., index.md#section -> index.md)
+    let path_part = dest.split('#').next().unwrap_or(dest);
+    let path_part = path_part.split('?').next().unwrap_or(path_part);
+
+    // resolve the path relative to the current file or the root content directory
+    let mut target_md_path = if path_part.starts_with('/') {
+        // if the user writes an absolute markdown path: /pages/post1.md
+        Path::new("./content/md").join(path_part.trim_start_matches('/'))
+    } else {
+        // f they wrote a relative path: ../index.md
+        let parent_dir = current_file_path
+            .parent()
+            .unwrap_or_else(|| Path::new("./content/md"));
+        parent_dir.join(path_part)
+    };
+
+    // handle extensions. If they wrote "index.html" or just "resume", we check for a .md file.
+    if target_md_path.extension().and_then(|e| e.to_str()) == Some("html")
+        || target_md_path.extension().is_none()
+    {
+        target_md_path.set_extension("md");
+    }
+
+    // check the file system. canonicalize resolves `..` and fails if the file is missing
+    let canonical_target = fs::canonicalize(&target_md_path).map_err(|_| {
+        anyhow!(
+            "Broken internal link: '{}' points to a file that does not exist.",
+            dest
+        )
+    })?;
+
+    let canonical_base = fs::canonicalize(Path::new("./content/md"))?;
+
+    let relative_to_base = canonical_target
+        .strip_prefix(&canonical_base)
+        .map_err(|_| {
+            anyhow!(
+                "Security/Architecture error: Link '{}' escapes the content directory.",
+                dest
+            )
+        })?;
+
+    // convert the file path to a root-relative web URL
+    let mut web_url = relative_to_base
+        .with_extension("")
+        .to_string_lossy()
+        .to_string();
+
+    // windows compatibility (replace \ with /)
+    web_url = web_url.replace("\\", "/");
+
+    // astro explicitly treats undefined as our root "/".
+    // if the file is index.md, the web_url shouldn't be /index, it should be /
+    if web_url == "index" {
+        Ok("/".to_string())
+    } else {
+        Ok(format!("/{}", web_url))
+    }
 }
 
 enum MetadataDateTimeOptions {

@@ -9,7 +9,6 @@ use axum::{
 };
 use model::{DbPage, JsonPage};
 use sqlx::{Pool, Sqlite};
-use std::env::var;
 
 pub fn pages_router() -> Router<Pool<Sqlite>> {
     Router::new()
