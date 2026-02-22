@@ -3,3 +3,4 @@
 tar.sh
 *.tar
 .env
+buildlog.txt

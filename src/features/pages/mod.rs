@@ -13,8 +13,8 @@ use std::env::var;
 
 pub fn pages_router() -> Router<Pool<Sqlite>> {
     Router::new()
-        .route("/pages/{slug}", get(get_page_handler))
-        .route("/pages", get(list_pages_handler))
+        .route("/{slug}", get(get_page_handler))
+        .route("/", get(list_pages_handler))
 }
 
 async fn get_page_handler(

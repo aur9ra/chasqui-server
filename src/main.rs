@@ -6,6 +6,7 @@ use sqlx::Sqlite;
 use sqlx::migrate::MigrateDatabase;
 use sqlx::sqlite::SqlitePoolOptions;
 use std::{env::var, path::Path};
+use tower_http::services::ServeDir;
 
 mod features;
 
@@ -17,8 +18,17 @@ async fn main() -> anyhow::Result<()> {
     // init environment variables
     let db_url =
         var("DATABASE_URL").expect("Failed to determine DATABASE_URL from environment variables");
+    let frontend_path = Path::new(
+        var("FRONTEND_DIST_PATH")
+            .expect("Failed to determine FRONTEND_DIST_PATH from environment variables")
+            .as_str(),
+    )
+    .to_owned();
     let db_url_str = db_url.as_str();
 
+    // TODO: Put all of this into a database_init type function? could this function simply return
+    // a pool?
+    // determine max connections to db at a time
     let max_connections = var("MAX_CONNECTIONS")
         .ok()
         .and_then(|val| val.parse::<u32>().ok())
@@ -71,8 +81,14 @@ async fn main() -> anyhow::Result<()> {
 
     println!("Sync complete. Starting server...");
 
+    // start router setup
+
+    // api router, where features are composed
+    let api_router = Router::new().nest("/pages", features::pages::pages_router());
+
     let app = Router::new()
-        .merge(features::pages::pages_router())
+        .nest("/api", api_router)
+        .fallback_service(ServeDir::new(frontend_path))
         .with_state(pool);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
