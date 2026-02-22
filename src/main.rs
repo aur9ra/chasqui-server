@@ -72,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
     println!("Sync complete. Starting server...");
 
     let app = Router::new()
-        .merge(features::pages::router())
+        .merge(features::pages::pages_router())
         .with_state(pool);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;

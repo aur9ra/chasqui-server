@@ -11,36 +11,10 @@ use model::{DbPage, JsonPage};
 use sqlx::{Pool, Sqlite};
 use std::env::var;
 
-pub fn router() -> Router<Pool<Sqlite>> {
+pub fn pages_router() -> Router<Pool<Sqlite>> {
     Router::new()
         .route("/pages/{slug}", get(get_page_handler))
         .route("/pages", get(list_pages_handler))
-        .route("/", get(default_page_handler))
-}
-
-async fn default_page_handler(
-    State(pool): State<Pool<Sqlite>>,
-) -> Result<Json<model::JsonPage>, StatusCode> {
-    // determine default handling through environment variables
-    let handle_default = var("ROUTER_SERVE_HOME_AT_DEFAULT")
-        .ok()
-        .and_then(|val| val.parse::<bool>().ok())
-        .unwrap_or(false);
-
-    if !handle_default {
-        return Err(StatusCode::NOT_FOUND); // should I use another status code?
-    }
-
-    let default_identifier = var("HOME_IDENTIFIER").unwrap_or(String::from("index.md"));
-
-    let page_option = repo::get_entry_by_identifier(default_identifier.as_str(), &pool).await;
-    match page_option {
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
-
-        Ok(None) => Err(StatusCode::NOT_FOUND),
-
-        Ok(Some(page)) => Ok(Json(db_page_to_json_page(&page, "%Y-%m-%d %H:%M:%S"))), // Ok(Json(page))
-    }
 }
 
 async fn get_page_handler(
