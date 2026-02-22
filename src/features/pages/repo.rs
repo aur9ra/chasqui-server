@@ -34,6 +34,20 @@ pub async fn get_entry_by_identifier(
     .await
 }
 
+pub async fn get_entry_by_filename(
+    filename: &str,
+    pool: &Pool<Sqlite>,
+) -> sqlx::Result<Option<DbPage>> {
+    sqlx::query_as::<_, DbPage>(
+        r#"
+        SELECT * FROM pages WHERE filename = ?
+        "#,
+    )
+    .bind(filename)
+    .fetch_optional(pool)
+    .await
+}
+
 pub async fn get_pages_from_db(pool: &Pool<Sqlite>) -> sqlx::Result<Vec<DbPage>> {
     let get_pages_status = sqlx::query_as!(DbPage, r#"SELECT 
                                                         identifier,
