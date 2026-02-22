@@ -1,5 +1,6 @@
 use crate::features::pages::model::DbPage;
 use crate::features::pages::repo::{get_pages_from_db, process_md_dir, process_page_operations};
+use crate::features::watcher::start_directory_watcher;
 use axum::Router;
 use dotenv;
 use sqlx::Sqlite;
@@ -66,20 +67,19 @@ async fn main() -> anyhow::Result<()> {
 
     // init pages, sync with db
     let md_path = Path::new("./content/md");
-
-    // get current pages in db
     let db_pages = get_pages_from_db(&pool).await.unwrap();
     let borrowable_db_pages: Vec<&DbPage> = db_pages.iter().collect();
-
-    // scan the directory and determine what needs to be inserted/updated/deleted
     let page_operations = process_md_dir(md_path, borrowable_db_pages).unwrap();
-
-    // execute the database operations
     process_page_operations(&pool, page_operations)
         .await
         .unwrap();
 
-    println!("Sync complete. Starting server...");
+    println!("Sync complete.");
+
+    // start background file watcher
+    start_directory_watcher(pool.clone());
+
+    println!("Starting server...");
 
     // start router setup
 
