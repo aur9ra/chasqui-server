@@ -91,8 +91,8 @@ async fn main() -> anyhow::Result<()> {
         .fallback_service(ServeDir::new(frontend_path))
         .with_state(pool);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
-    println!("Server listening on http://127.0.0.1:3000");
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+    println!("Server listening on http://0.0.0.0:3000");
 
     axum::serve(listener, app).await?;
 
