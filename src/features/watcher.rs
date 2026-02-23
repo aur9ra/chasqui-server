@@ -1,4 +1,5 @@
 use crate::config::ChasquiConfig;
+use crate::features::pages::model::DbOperationReport;
 use crate::features::pages::model::DbPage;
 use crate::features::pages::repo::{
     build_valid_files_set, get_entry_by_filename, get_pages_from_db, process_md_dir,
@@ -16,6 +17,7 @@ use tokio::sync::mpsc;
 // what operations does our async worker know?
 enum SyncCommand {
     SingleFile(PathBuf),
+    DeleteFile(PathBuf),
     FullSync,
 }
 
@@ -32,27 +34,37 @@ pub fn start_directory_watcher(pool: Pool<Sqlite>, config: Arc<ChasquiConfig>) {
     // create os watcher
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if let Ok(event) = res {
-            if matches!(event.kind, EventKind::Modify(_)) {
-                // grab the path of the file that was modified
-                if let Some(path) = event.paths.first() {
-                    // try to send the single file to the worker
-                    // 'try_send' does NOT block. if the queue is full, it immediately returns an Err.
-                    match tx.try_send(SyncCommand::SingleFile(path.clone())) {
-                        Ok(_) => {},
-                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                            // the channel is overflowing
-                            // flip the emergency alarm to true
-                            // Ordering::SeqCst propogates this info to all threads instantly
-                            needs_full_sync_clone.store(true, Ordering::SeqCst);
-                            println!("Warning: File event dropped due to high traffic. Triggering Full Sync.");
-                        },
-                        Err(_) => {}
+            // determine if this event is something we care about
+            let command = match event.kind {
+                // catch creations and modifications
+                EventKind::Create(_) | EventKind::Modify(_) => event
+                    .paths
+                    .first()
+                    .map(|p| SyncCommand::SingleFile(p.clone())),
+                // catch deletions
+                EventKind::Remove(_) => event
+                    .paths
+                    .first()
+                    .map(|p| SyncCommand::DeleteFile(p.clone())),
+                _ => None,
+            };
+
+            // If it's a command we care about, try to send it
+            if let Some(cmd) = command {
+                match tx.try_send(cmd) {
+                    Ok(_) => {}
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        needs_full_sync_clone.store(true, Ordering::SeqCst);
+                        println!(
+                            "Warning: File event dropped due to high traffic. Triggering Full Sync."
+                        );
                     }
+                    Err(_) => {}
                 }
             }
         }
-    }).expect("Failed to initialize file watcher");
-
+    })
+    .expect("Failed to initialize file watcher");
     // tell the watcher where to look
     watcher
         .watch(&config.content_dir, RecursiveMode::Recursive)
@@ -92,17 +104,13 @@ pub fn start_directory_watcher(pool: Pool<Sqlite>, config: Arc<ChasquiConfig>) {
                 // clear queue (we just synced the whole file system)
                 while let Ok(_) = rx.try_recv() {}
             } else {
-                // normal Operation: Handle the command from the queue
                 match command {
+                    // handle updates
                     SyncCommand::SingleFile(path) => {
                         println!("Processing single file change: {:?}", path);
-
-                        // extract filename to query the database
                         let relative_path = path.strip_prefix(&config.content_dir).unwrap_or(&path);
                         let filename = relative_path.to_string_lossy().to_string();
 
-                        // single file logic
-                        // query ONLY the file that changed
                         if let Ok(db_page_opt) = get_entry_by_filename(&filename, &pool).await {
                             let valid_files = build_valid_files_set(&config.content_dir);
                             if let Ok(operation_report) =
@@ -115,17 +123,30 @@ pub fn start_directory_watcher(pool: Pool<Sqlite>, config: Arc<ChasquiConfig>) {
                             }
                         }
                     }
-                    SyncCommand::FullSync => {} // not yet implemented
+                    // handle deletions
+                    SyncCommand::DeleteFile(path) => {
+                        println!("Processing single file deletion: {:?}", path);
+                        let relative_path = path.strip_prefix(&config.content_dir).unwrap_or(&path);
+                        let filename = relative_path.to_string_lossy().to_string();
+
+                        // query to see if this file even existed in the DB
+                        if let Ok(Some(db_page)) = get_entry_by_filename(&filename, &pool).await {
+                            // package it for deletion
+                            let ops = vec![(db_page, DbOperationReport::Delete)];
+                            if process_page_operations(&pool, ops).await.is_ok() {
+                                sync_occurred = true;
+                            }
+                        }
+                    }
+                    SyncCommand::FullSync => {}
                 }
             }
 
-            // if a database write happened, try to trigger the node.js build
             if sync_occurred {
                 trigger_frontend_build(&http_client, &config.webhook_url, &config.webhook_secret)
                     .await;
             }
 
-            // 500ms debounce
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
     });

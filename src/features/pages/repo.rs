@@ -127,6 +127,17 @@ pub fn process_md_dir(
         };
     }
 
+    // look for page deletions
+    for (filename, db_page) in db_pages_map {
+        if !valid_files.contains(filename) {
+            println!(
+                "Ghost file detected in db, marking {} for deletion.",
+                filename
+            );
+            page_operations.push((db_page.clone(), DbOperationReport::Delete));
+        }
+    }
+
     Ok(page_operations)
 }
 
