@@ -1,6 +1,7 @@
 pub mod model;
 pub mod repo;
 
+use crate::AppState;
 use axum::{
     Json, Router,
     extract::{Path, State},
@@ -8,19 +9,18 @@ use axum::{
     routing::get,
 };
 use model::{DbPage, JsonPage};
-use sqlx::{Pool, Sqlite};
 
-pub fn pages_router() -> Router<Pool<Sqlite>> {
+pub fn pages_router() -> Router<AppState> {
     Router::new()
         .route("/{slug}", get(get_page_handler))
         .route("/", get(list_pages_handler))
 }
 
 async fn get_page_handler(
-    State(pool): State<Pool<Sqlite>>,
+    State(state): State<AppState>,
     Path(slug): Path<String>,
 ) -> Result<Json<model::JsonPage>, StatusCode> {
-    let page_option = repo::get_entry_by_identifier(&slug, &pool).await;
+    let page_option = repo::get_entry_by_identifier(&slug, &state.pool).await;
 
     match page_option {
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
@@ -32,9 +32,9 @@ async fn get_page_handler(
 }
 
 async fn list_pages_handler(
-    State(pool): State<Pool<Sqlite>>,
+    State(state): State<AppState>,
 ) -> Result<Json<Vec<model::JsonPage>>, StatusCode> {
-    let db_pages = repo::get_pages_from_db(&pool)
+    let db_pages = repo::get_pages_from_db(&state.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 

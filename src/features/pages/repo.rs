@@ -1,15 +1,16 @@
+use crate::ChasquiConfig;
 use crate::features::pages::model::{DbOperationReport, DbPage};
 use anyhow::{Result, anyhow};
-use gray_matter::{Matter, ParsedEntity, engine::YAML};
+use gray_matter::{Matter, engine::YAML};
 use pulldown_cmark::{Event, Options as CmarkOptions, Parser, Tag, html};
 use serde::Deserialize;
 use sqlx::types::chrono::NaiveDateTime;
 use sqlx::{Pool, Sqlite};
-use std::collections::HashMap;
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::{env, fs};
-use walkdir::{DirEntry, WalkDir};
+use walkdir::WalkDir;
 use xxhash_rust::xxh3::xxh3_64;
 
 #[derive(Deserialize, Debug, Default)]
@@ -19,15 +20,6 @@ struct PageFrontMatter {
     tags: Option<Vec<String>>,
     modified_datetime: Option<String>,
     created_datetime: Option<String>,
-}
-
-static STRIP_EXTENSION: OnceLock<bool> = OnceLock::new();
-
-fn should_strip_extension() -> bool {
-    *STRIP_EXTENSION.get_or_init(|| {
-        env::var("DEFAULT_IDENTIFIER_STRIP_EXTENSION").unwrap_or_else(|_| "false".to_string())
-            == "true"
-    })
 }
 
 pub async fn get_entry_by_identifier(
@@ -73,15 +65,34 @@ pub async fn get_pages_from_db(pool: &Pool<Sqlite>) -> sqlx::Result<Vec<DbPage>>
     Ok(get_pages_status)
 }
 
-// iterate over the files at md_path.
-// generate a list of operations that need to be performed to get the db in sync with our md files.
+pub fn build_valid_files_set(content_dir: &Path) -> HashSet<String> {
+    let mut valid_files = HashSet::new();
+
+    // we only care about successful reads, filter_map over Ok()
+    for entry in WalkDir::new(content_dir).into_iter().filter_map(|e| e.ok()) {
+        if entry.file_type().is_file()
+            && entry.path().extension().and_then(|s| s.to_str()) == Some("md")
+        {
+            if let Ok(relative) = entry.path().strip_prefix(content_dir) {
+                // normalize to forward slashes for cross-platform consistency
+                let normalized = relative.to_string_lossy().replace("\\", "/");
+                valid_files.insert(normalized);
+            }
+        }
+    }
+    valid_files
+}
+
 pub fn process_md_dir(
     md_path: &Path,
     pages_from_db: Vec<&DbPage>,
+    config: &ChasquiConfig,
 ) -> Result<Vec<(DbPage, DbOperationReport)>> {
     let mut page_operations: Vec<(DbPage, DbOperationReport)> = Vec::new();
     let db_pages_map = pages_to_hashmap(pages_from_db);
-    let md_location_prefix = Path::new("./content/md/");
+
+    // build the set of valid files
+    let valid_files = build_valid_files_set(md_path);
 
     for result_entry in WalkDir::new(md_path) {
         let entry = match result_entry {
@@ -96,18 +107,17 @@ pub fn process_md_dir(
             continue;
         }
 
-        // We must extract the filename to look up the existing page in the HashMap
+        // We use config.content_dir to safely strip the prefix
         let relative_path = entry
             .path()
-            .strip_prefix(md_location_prefix)
+            .strip_prefix(&config.content_dir)
             .unwrap_or(entry.path());
         let filename = relative_path.to_string_lossy().to_string();
 
-        // Get the Option<DbPage> to see if it already exists
         let db_page_opt = db_pages_map.get(&filename).cloned();
 
-        // Pass the path and the optional DbPage to our Orchestrator
-        match process_single_file(entry.path(), db_page_opt) {
+        // 3. Pass the config and the valid_files set into the single file processor
+        match process_single_file(entry.path(), db_page_opt, config, &valid_files) {
             Ok(page_report) => {
                 page_operations.push(page_report);
             }
@@ -127,90 +137,34 @@ pub fn process_md_dir(
 pub fn process_single_file(
     path: &Path,
     db_page_opt: Option<DbPage>,
+    config: &ChasquiConfig,
+    valid_files: &HashSet<String>,
 ) -> Result<(DbPage, DbOperationReport)> {
-    let md_location_prefix = Path::new("./content/md/");
-
+    // 1. Read file from disk
     let md_content = fs::read_to_string(path)
         .map_err(|e| anyhow!("Unable to read file {}: {}", path.display(), e))?;
 
-    let relative_path = path.strip_prefix(md_location_prefix).unwrap_or(path);
-
+    // 2. Resolve relative path safely using config
+    let relative_path = path.strip_prefix(&config.content_dir).unwrap_or(path);
     let filename = relative_path.to_string_lossy().to_string();
 
-    // extract Frontmatter
-    let (frontmatter, content_body) = extract_frontmatter(&md_content, &filename)?;
-
-    let default_identifier = if should_strip_extension() {
-        relative_path
-            .with_extension("")
-            .to_string_lossy()
-            .to_string()
-    } else {
-        filename.clone()
-    };
-
-    let strip_extension = env::var("DEFAULT_IDENTIFIER_STRIP_EXTENSION")
-        .unwrap_or_else(|_| "false".to_string())
-        == "true";
-
-    let default_identifier = if strip_extension {
-        relative_path
-            .with_extension("")
-            .to_string_lossy()
-            .to_string()
-    } else {
-        filename.clone()
-    };
-
-    let identifier = frontmatter.identifier.unwrap_or(default_identifier);
-    let name = frontmatter.name;
-    let tags = frontmatter
-        .tags
-        .map(|t| serde_json::to_string(&t).unwrap_or_default());
-
-    // hash content, early exit if md_content is same
-    let file_md_content_hash = format!("{:016x}", xxh3_64(md_content.as_bytes()));
-    if let Some(db_page) = &db_page_opt {
-        if db_page.md_content_hash == file_md_content_hash {
-            return Ok((db_page.clone(), DbOperationReport::NoChange));
-        }
-    }
-
-    // resolve OS dates
-    let metadata =
-        fs::metadata(path).map_err(|_| anyhow!("Failed to read OS metadata for {}", filename))?;
-
+    // 3. Extract OS metadata
+    let metadata_result = fs::metadata(path);
     let os_modified =
-        get_property_from_metadata(&Ok(metadata.clone()), &MetadataDateTimeOptions::Modified).ok();
+        get_property_from_metadata(&metadata_result, &MetadataDateTimeOptions::Modified).ok();
     let os_created =
-        get_property_from_metadata(&Ok(metadata), &MetadataDateTimeOptions::Created).ok();
+        get_property_from_metadata(&metadata_result, &MetadataDateTimeOptions::Created).ok();
 
-    let final_modified_datetime = resolve_datetime(frontmatter.modified_datetime, os_modified);
-    let final_created_datetime = resolve_datetime(frontmatter.created_datetime, os_created);
-
-    // AST -> HTML
-    let html_content = compile_markdown_to_html(path, &filename, &content_body)?;
-
-    // package for database
-    let operation = if db_page_opt.is_some() {
-        DbOperationReport::Update
-    } else {
-        DbOperationReport::Insert
-    };
-
-    let new_page = DbPage {
-        identifier,
-        filename,
-        name,
-        html_content,
-        md_content: content_body,
-        md_content_hash: file_md_content_hash,
-        tags,
-        modified_datetime: final_modified_datetime,
-        created_datetime: final_created_datetime,
-    };
-
-    Ok((new_page, operation))
+    // 4. Pass ingredients to the pure core
+    parse_markdown_to_db_page(
+        &filename,
+        &md_content,
+        os_modified,
+        os_created,
+        db_page_opt,
+        config,
+        valid_files,
+    )
 }
 
 // extracts YAML frontmatter and returns the typed metadata alongside the raw markdown body
@@ -233,6 +187,7 @@ fn compile_markdown_to_html(
     current_file_path: &Path,
     filename: &str,
     markdown_content: &str,
+    valid_files: &HashSet<String>,
 ) -> Result<String> {
     let mut options = CmarkOptions::empty();
     options.insert(CmarkOptions::ENABLE_STRIKETHROUGH);
@@ -254,7 +209,7 @@ fn compile_markdown_to_html(
                 let dest_str = dest_url.to_string();
 
                 // pass the link the validator
-                match validate_and_rewrite_link(current_file_path, &dest_str) {
+                match validate_and_rewrite_link(current_file_path, &dest_str, valid_files) {
                     Ok(new_dest) => {
                         // take the link the validator gave back and push it in place of the old
                         rewrote_events.push(Event::Start(Tag::Link {
@@ -281,6 +236,73 @@ fn compile_markdown_to_html(
     html::push_html(&mut html_content, rewrote_events.into_iter());
 
     Ok(html_content)
+}
+
+pub fn parse_markdown_to_db_page(
+    filename: &str,
+    md_content: &str,
+    os_modified: Option<NaiveDateTime>,
+    os_created: Option<NaiveDateTime>,
+    db_page_opt: Option<DbPage>,
+    config: &ChasquiConfig,
+    valid_files: &HashSet<String>,
+) -> Result<(DbPage, DbOperationReport)> {
+    // hash content and early exit if md content hash is the same
+    let file_md_content_hash = format!("{:016x}", xxh3_64(md_content.as_bytes()));
+    if let Some(db_page) = &db_page_opt {
+        if db_page.md_content_hash == file_md_content_hash {
+            return Ok((db_page.clone(), DbOperationReport::NoChange));
+        }
+    }
+
+    // extract frontmatter
+    let (frontmatter, content_body) = extract_frontmatter(md_content, filename)?;
+
+    // resolve identifier
+    let default_identifier = if config.strip_extensions {
+        Path::new(filename)
+            .with_extension("")
+            .to_string_lossy()
+            .to_string()
+    } else {
+        filename.to_string()
+    };
+    let identifier = frontmatter.identifier.unwrap_or(default_identifier);
+
+    // resolve dates with OS metadata
+    let final_modified_datetime = resolve_datetime(frontmatter.modified_datetime, os_modified);
+    let final_created_datetime = resolve_datetime(frontmatter.created_datetime, os_created);
+
+    // setup tags and names
+    let name = frontmatter.name;
+    let tags = frontmatter
+        .tags
+        .map(|t| serde_json::to_string(&t).unwrap_or_default());
+
+    // AST -> HTML
+    let html_content =
+        compile_markdown_to_html(Path::new(filename), filename, &content_body, valid_files)?;
+
+    // 7. Package for Database
+    let operation = if db_page_opt.is_some() {
+        DbOperationReport::Update
+    } else {
+        DbOperationReport::Insert
+    };
+
+    let new_page = DbPage {
+        identifier,
+        filename: filename.to_string(),
+        name,
+        html_content,
+        md_content: content_body,
+        md_content_hash: file_md_content_hash,
+        tags,
+        modified_datetime: final_modified_datetime,
+        created_datetime: final_created_datetime,
+    };
+
+    Ok((new_page, operation))
 }
 
 fn resolve_datetime(
@@ -399,7 +421,11 @@ pub async fn process_page_operations(
     Ok(())
 }
 
-fn validate_and_rewrite_link(current_file_path: &Path, dest: &str) -> Result<String> {
+fn validate_and_rewrite_link(
+    current_file_path: &Path,
+    dest: &str,
+    valid_files: &HashSet<String>,
+) -> Result<String> {
     // ignore external links and anchor links
     if dest.starts_with("http://")
         || dest.starts_with("https://")
@@ -413,60 +439,63 @@ fn validate_and_rewrite_link(current_file_path: &Path, dest: &str) -> Result<Str
     let path_part = dest.split('#').next().unwrap_or(dest);
     let path_part = path_part.split('?').next().unwrap_or(path_part);
 
-    // resolve the path relative to the current file or the root content directory
+    // resolve the path mathematically in memory using 'lexical' joining
     let mut target_md_path = if path_part.starts_with('/') {
-        // if the user writes an absolute markdown path: /pages/post1.md
-        Path::new("./content/md").join(path_part.trim_start_matches('/'))
+        PathBuf::from(path_part.trim_start_matches('/'))
     } else {
-        // f they wrote a relative path: ../index.md
-        let parent_dir = current_file_path
-            .parent()
-            .unwrap_or_else(|| Path::new("./content/md"));
+        let parent_dir = current_file_path.parent().unwrap_or_else(|| Path::new("")); // If no parent, it's at the root
         parent_dir.join(path_part)
     };
 
-    // handle extensions. If they wrote "index.html" or just "resume", we check for a .md file.
+    // handle extensions
     if target_md_path.extension().and_then(|e| e.to_str()) == Some("html")
         || target_md_path.extension().is_none()
     {
         target_md_path.set_extension("md");
     }
 
-    // check the file system. canonicalize resolves `..` and fails if the file is missing
-    let canonical_target = fs::canonicalize(&target_md_path).map_err(|_| {
-        anyhow!(
-            "Broken internal link: '{}' points to a file that does not exist.",
-            dest
-        )
-    })?;
+    // clean the path to handle `../` mathematically (e.g., "folder/../index.md" -> "index.md")
+    // we use a small helper here to parse the components without hitting the disk
+    let normalized_path = normalize_path_lexically(&target_md_path);
+    let normalized_string = normalized_path.to_string_lossy().replace("\\", "/");
 
-    let canonical_base = fs::canonicalize(Path::new("./content/md"))?;
-
-    let relative_to_base = canonical_target
-        .strip_prefix(&canonical_base)
-        .map_err(|_| {
-            anyhow!(
-                "Security/Architecture error: Link '{}' escapes the content directory.",
-                dest
-            )
-        })?;
+    if !valid_files.contains(&normalized_string) {
+        return Err(anyhow!(
+            "Broken internal link: '{}' resolves to '{}', which does not exist.",
+            dest,
+            normalized_string
+        ));
+    }
 
     // convert the file path to a root-relative web URL
-    let mut web_url = relative_to_base
+    let web_url = normalized_path
         .with_extension("")
         .to_string_lossy()
-        .to_string();
-
-    // windows compatibility (replace \ with /)
-    web_url = web_url.replace("\\", "/");
+        .to_string()
+        .replace("\\", "/");
 
     // astro explicitly treats undefined as our root "/".
-    // if the file is index.md, the web_url shouldn't be /index, it should be /
     if web_url == "index" {
         Ok("/".to_string())
     } else {
         Ok(format!("/{}", web_url))
     }
+}
+
+// helper to mathematically resolve `.` and `..` without touching the filesystem
+fn normalize_path_lexically(path: &Path) -> PathBuf {
+    let mut components = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                components.pop();
+            }
+            std::path::Component::Normal(c) => components.push(c),
+            _ => components.push(component.as_os_str()),
+        }
+    }
+    components.into_iter().collect()
 }
 
 enum MetadataDateTimeOptions {
@@ -475,7 +504,7 @@ enum MetadataDateTimeOptions {
 }
 
 fn get_property_from_metadata(
-    metadata_result: &Result<fs::Metadata>,
+    metadata_result: &std::io::Result<fs::Metadata>,
     options: &MetadataDateTimeOptions,
 ) -> Result<NaiveDateTime> {
     // depending on user's provided options, attempt to get modified/created data from metadata
