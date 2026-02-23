@@ -1,5 +1,6 @@
+use std::sync::OnceLock;
 use crate::features::pages::model::DbPage;
-use crate::features::pages::repo::{get_pages_from_db, process_md_dir, process_page_operations};
+use crate::features::pages::repo::{get_pages_from_db, process_md_dir, process_page_operations, process_single_file, get_entry_by_filename};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use reqwest::Client;
 use sqlx::{Pool, Sqlite};
@@ -9,6 +10,21 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
+
+// config cache
+struct WebhookConfig {
+    url: String,
+    secret: String,
+}
+
+static WEBHOOK_CONFIG: OnceLock<WebhookConfig> = OnceLock::new();
+
+fn get_webhook_config() -> &'static WebhookConfig {
+    WEBHOOK_CONFIG.get_or_init(|| WebhookConfig {
+        url: var("FRONTEND_WEBHOOK_URL").unwrap_or_else(|_| "http://127.0.0.1:4000/build".to_string()),
+        secret: var("WEBHOOK_SECRET").unwrap_or_default(),
+    })
+}
 
 // what operations does our async worker know?
 enum SyncCommand {
@@ -73,25 +89,44 @@ pub fn start_directory_watcher(pool: Pool<Sqlite>) {
             if needs_full_sync.swap(false, Ordering::SeqCst) {
                 println!("Executing Fallback Full Directory Sync...");
                 
-                // process file logic here
-                
-                sync_occurred = true;
+                // process file logic
+                if let Ok(db_pages) = get_pages_from_db(&pool).await {
+                                        let borrowable_db_pages: Vec<&DbPage> = db_pages.iter().collect();
+                                        
+                                        if let Ok(page_operations) = process_md_dir(Path::new("./content/md"), borrowable_db_pages) {
+                                        if process_page_operations(&pool, page_operations).await.is_ok() {
+                                            sync_occurred = true;
+                                        }
+                                    }
+                                    }
                 
                 // clear queue (we just synced the whole file system)
                 while let Ok(_) = rx.try_recv() {} 
             } else {
                 // Normal Operation: Handle the command from the queue
-                match command {
+match command {
                     SyncCommand::SingleFile(path) => {
                         println!("Processing single file change: {:?}", path);
                         
-                        // process file change with new repo logic                        
+                        // Extract filename to query the database
+                        let md_location_prefix = Path::new("./content/md/");
+                        let relative_path = path.strip_prefix(md_location_prefix).unwrap_or(&path);
+                        let filename = relative_path.to_string_lossy().to_string();
 
-                        // sync_occurred = true; // (if db actually updated)
+                        // 2. Single File Logic
+                        // Query ONLY the file that changed
+                        if let Ok(db_page_opt) = get_entry_by_filename(&filename, &pool).await {
+                            // Process it
+                            if let Ok(operation_report) = process_single_file(&path, db_page_opt) {
+                                // Execute the single operation by wrapping it in a Vec
+                                let ops = vec![operation_report];
+                                if process_page_operations(&pool, ops).await.is_ok() {
+                                    sync_occurred = true;
+                                }
+                            }
+                        }
                     },
-                    SyncCommand::FullSync => {
-                        // this handles manual full-sync commands if we ever add them
-                    }
+                    SyncCommand::FullSync => {} // not yet implemented
                 }
             }
 
@@ -107,15 +142,13 @@ pub fn start_directory_watcher(pool: Pool<Sqlite>) {
 }
 
 async fn trigger_frontend_build(client: &Client) {
-    let webhook_url =
-        var("FRONTEND_WEBHOOK_URL").unwrap_or_else(|_| "http://127.0.0.1:4000/build".to_string()); // 127.0.0.1?
-    let webhook_secret = var("WEBHOOK_SECRET").unwrap_or_default();
+    let config = get_webhook_config();
 
-    println!("Triggering frontend build at {}...", webhook_url);
+    println!("Triggering frontend build at {}...", config.url);
 
     let res = client
-        .post(&webhook_url)
-        .header("Authorization", format!("Bearer {}", webhook_secret))
+        .post(&config.url)
+        .header("Authorization", format!("Bearer {}", config.secret))
         .send()
         .await;
 

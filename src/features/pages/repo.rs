@@ -7,6 +7,7 @@ use sqlx::types::chrono::NaiveDateTime;
 use sqlx::{Pool, Sqlite};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::OnceLock;
 use std::{env, fs};
 use walkdir::{DirEntry, WalkDir};
 use xxhash_rust::xxh3::xxh3_64;
@@ -18,6 +19,15 @@ struct PageFrontMatter {
     tags: Option<Vec<String>>,
     modified_datetime: Option<String>,
     created_datetime: Option<String>,
+}
+
+static STRIP_EXTENSION: OnceLock<bool> = OnceLock::new();
+
+fn should_strip_extension() -> bool {
+    *STRIP_EXTENSION.get_or_init(|| {
+        env::var("DEFAULT_IDENTIFIER_STRIP_EXTENSION").unwrap_or_else(|_| "false".to_string())
+            == "true"
+    })
 }
 
 pub async fn get_entry_by_identifier(
@@ -70,99 +80,80 @@ pub fn process_md_dir(
     pages_from_db: Vec<&DbPage>,
 ) -> Result<Vec<(DbPage, DbOperationReport)>> {
     let mut page_operations: Vec<(DbPage, DbOperationReport)> = Vec::new();
-
     let db_pages_map = pages_to_hashmap(pages_from_db);
+    let md_location_prefix = Path::new("./content/md/");
 
     for result_entry in WalkDir::new(md_path) {
         let entry = match result_entry {
             Ok(val) => val,
-
-            // somehow this is not a valid entry
             Err(_) => continue,
         };
 
-        // skip anything that isn't a file
         if !entry.file_type().is_file() {
             continue;
         }
-
-        // work with only markdown files (for now)
         if entry.path().extension().and_then(|s| s.to_str()) != Some("md") {
             continue;
         }
 
-        let operation_report = process_dir_entry(&entry, &db_pages_map);
-        match operation_report {
+        // We must extract the filename to look up the existing page in the HashMap
+        let relative_path = entry
+            .path()
+            .strip_prefix(md_location_prefix)
+            .unwrap_or(entry.path());
+        let filename = relative_path.to_string_lossy().to_string();
+
+        // Get the Option<DbPage> to see if it already exists
+        let db_page_opt = db_pages_map.get(&filename).cloned();
+
+        // Pass the path and the optional DbPage to our Orchestrator
+        match process_single_file(entry.path(), db_page_opt) {
             Ok(page_report) => {
                 page_operations.push(page_report);
             }
             Err(e) => {
-                eprintln!("Error occurred processing page: {}", e);
+                eprintln!("Error occurred processing page {}: {}", filename, e);
             }
         };
     }
 
     Ok(page_operations)
-    // TODO: Add delete operations when a db page no longer exists in the file system.
-    // TODO: Allow a config setting to ask the user whether or not to keep the file.
-    // TODO: Identify "moves" with some confidence.
 }
 
 // process a directory entry, identify if it's a page, and identify necessary action
 // additionally, report which db operation is appropriate (single responsibility)
 // returns error if unable to read file, unable to process frontmatter, or any links to other pages are broken
 //  TODO: break this function down! this is huge
-fn process_dir_entry(
-    entry: &DirEntry,
-    db_pages: &HashMap<&String, DbPage>,
+pub fn process_single_file(
+    path: &Path,
+    db_page_opt: Option<DbPage>,
 ) -> Result<(DbPage, DbOperationReport)> {
     let md_location_prefix = Path::new("./content/md/");
 
-    // if it's a file, cool, otherwise, skip
-    let md_content = match fs::read_to_string(&entry.path()) {
-        Ok(content) => content,
+    let md_content = fs::read_to_string(path)
+        .map_err(|e| anyhow!("Unable to read file {}: {}", path.display(), e))?;
 
-        // unable to read file
-        Err(e) => {
-            return Err(anyhow!(
-                "Unable to read file {}: {}",
-                &entry.path().display(),
-                e
-            ));
-        }
+    let relative_path = path.strip_prefix(md_location_prefix).unwrap_or(path);
+
+    let filename = relative_path.to_string_lossy().to_string();
+
+    // extract Frontmatter
+    let (frontmatter, content_body) = extract_frontmatter(&md_content, &filename)?;
+
+    let default_identifier = if should_strip_extension() {
+        relative_path
+            .with_extension("")
+            .to_string_lossy()
+            .to_string()
+    } else {
+        filename.clone()
     };
 
-    // get path
-    let path = entry.path();
-    let relative_path = path.strip_prefix(md_location_prefix).unwrap_or(&path);
-
-    let filename = relative_path.to_string_lossy().to_string().to_owned();
-    // there's got to be a better way to do this?
-
-    // parse frontmatter and seperate it from the content
-    let matter = Matter::<YAML>::new();
-    let parsed_matter: ParsedEntity = matter
-        .parse(&md_content)
-        .map_err(|e| anyhow!("Failed to parse frontmatter in {}: {}", filename, e))?;
-
-    // deserialize frontmatter into our struct
-    let frontmatter = match parsed_matter.data {
-        Some(pod) => pod.deserialize::<PageFrontMatter>().unwrap_or_default(),
-        None => PageFrontMatter::default(),
-    };
-
-    // convert tags into a JSON string for db
-    let tags = frontmatter
-        .tags
-        .map(|t| serde_json::to_string(&t).unwrap_or_default());
-
-    // determine the identifier
     let strip_extension = env::var("DEFAULT_IDENTIFIER_STRIP_EXTENSION")
         .unwrap_or_else(|_| "false".to_string())
         == "true";
 
     let default_identifier = if strip_extension {
-        // if path is "pages/post1.md", this extracts "pages/post1"
         relative_path
             .with_extension("")
             .to_string_lossy()
@@ -172,54 +163,88 @@ fn process_dir_entry(
     };
 
     let identifier = frontmatter.identifier.unwrap_or(default_identifier);
-
     let name = frontmatter.name;
+    let tags = frontmatter
+        .tags
+        .map(|t| serde_json::to_string(&t).unwrap_or_default());
 
+    // hash content, early exit if md_content is same
     let file_md_content_hash = format!("{:016x}", xxh3_64(md_content.as_bytes()));
-
-    // try to get the corresponding db page, if exists
-    let db_page_opt = db_pages.get(&filename);
-
-    // to save on computation, let's peek into the corresponding database page (if it exists) to
-    // see if the hash of the content is the same
-    if let Some(db_page) = db_page_opt
-        && db_page.md_content_hash == file_md_content_hash
-    {
-        return Ok((db_page.to_owned(), DbOperationReport::NoChange));
-    };
-
-    let metadata = match fs::metadata(entry.path()) {
-        Ok(m) => Ok(m),
-        Err(_) => {
-            eprintln!("Warning: Could not read OS metadata for {}", filename);
-            Err(anyhow!("Failed to read metadata"))
+    if let Some(db_page) = &db_page_opt {
+        if db_page.md_content_hash == file_md_content_hash {
+            return Ok((db_page.clone(), DbOperationReport::NoChange));
         }
-    };
+    }
 
-    // get modified/created time from the OS file properties
+    // resolve OS dates
+    let metadata =
+        fs::metadata(path).map_err(|_| anyhow!("Failed to read OS metadata for {}", filename))?;
+
     let os_modified =
-        get_property_from_metadata(&metadata, &MetadataDateTimeOptions::Modified).ok();
-    let os_created = get_property_from_metadata(&metadata, &MetadataDateTimeOptions::Created).ok();
+        get_property_from_metadata(&Ok(metadata.clone()), &MetadataDateTimeOptions::Modified).ok();
+    let os_created =
+        get_property_from_metadata(&Ok(metadata), &MetadataDateTimeOptions::Created).ok();
 
-    // resolve modified/created times
     let final_modified_datetime = resolve_datetime(frontmatter.modified_datetime, os_modified);
     let final_created_datetime = resolve_datetime(frontmatter.created_datetime, os_created);
 
-    // AST validation and HTML generation
+    // AST -> HTML
+    let html_content = compile_markdown_to_html(path, &filename, &content_body)?;
+
+    // package for database
+    let operation = if db_page_opt.is_some() {
+        DbOperationReport::Update
+    } else {
+        DbOperationReport::Insert
+    };
+
+    let new_page = DbPage {
+        identifier,
+        filename,
+        name,
+        html_content,
+        md_content: content_body,
+        md_content_hash: file_md_content_hash,
+        tags,
+        modified_datetime: final_modified_datetime,
+        created_datetime: final_created_datetime,
+    };
+
+    Ok((new_page, operation))
+}
+
+// extracts YAML frontmatter and returns the typed metadata alongside the raw markdown body
+fn extract_frontmatter(md_content: &str, filename: &str) -> Result<(PageFrontMatter, String)> {
+    let matter = Matter::<YAML>::new();
+
+    // explicitly tell 'parse' with epic turbofish syntax to use our PageFrontMatter struct for <D>
+    let parsed_matter = matter
+        .parse::<PageFrontMatter>(md_content)
+        .map_err(|e| anyhow!("Failed to parse frontmatter in {}: {}", filename, e))?;
+
+    let frontmatter = parsed_matter.data.unwrap_or_default();
+
+    Ok((frontmatter, parsed_matter.content))
+}
+
+// compiles markdown content into HTML, explicitly validating and rewriting internal links
+// if a link is broken, compilation immediately halts and returns an Error
+fn compile_markdown_to_html(
+    current_file_path: &Path,
+    filename: &str,
+    markdown_content: &str,
+) -> Result<String> {
     let mut options = CmarkOptions::empty();
     options.insert(CmarkOptions::ENABLE_STRIKETHROUGH);
     options.insert(CmarkOptions::ENABLE_TABLES);
 
-    let parser = Parser::new_ext(&parsed_matter.content, options);
-
+    let parser = Parser::new_ext(markdown_content, options);
     let mut rewrote_events = Vec::new();
-    let mut has_broken_link = false;
-    let mut error_message = String::new();
 
     // iterate over the event stream
     for event in parser {
         match event {
-            // in the event of seeing a link...
+            // is this the start of a link?
             Event::Start(Tag::Link {
                 link_type,
                 dest_url,
@@ -228,10 +253,10 @@ fn process_dir_entry(
             }) => {
                 let dest_str = dest_url.to_string();
 
-                // Pass it to our validator
-                match validate_and_rewrite_link(&entry.path(), &dest_str) {
+                // pass the link the validator
+                match validate_and_rewrite_link(current_file_path, &dest_str) {
                     Ok(new_dest) => {
-                        // push the rewritten link back onto the ast tree
+                        // take the link the validator gave back and push it in place of the old
                         rewrote_events.push(Event::Start(Tag::Link {
                             link_type,
                             dest_url: new_dest.into(),
@@ -240,15 +265,10 @@ fn process_dir_entry(
                         }));
                     }
                     Err(e) => {
-                        has_broken_link = true;
-                        error_message = format!("In {}: {}", filename, e);
-                        // push the original event so the compiler doesn't crash
-                        rewrote_events.push(Event::Start(Tag::Link {
-                            link_type,
-                            dest_url,
-                            title,
-                            id,
-                        }));
+                        // woah, this internal link is invalid.
+                        // we don't want to push this page.
+                        // immediately abort the entire function and return the error.
+                        return Err(anyhow!("In {}: {}", filename, e));
                     }
                 }
             }
@@ -257,55 +277,10 @@ fn process_dir_entry(
         }
     }
 
-    // halt ingestion if a broken link was found
-    if has_broken_link {
-        return Err(anyhow!("{}", error_message));
-    }
-
-    // compile the modified event stream into an HTML string
     let mut html_content = String::new();
     html::push_html(&mut html_content, rewrote_events.into_iter());
 
-    // finally, determine which operation must be made for this page on the db
-    if let Some(db_page) = db_page_opt {
-        // UPDATING EXISTING PAGE IN DB
-
-        let identifier = db_page.identifier.to_owned();
-        let name = db_page.name.to_owned();
-        let tags = db_page.tags.to_owned();
-
-        return Ok((
-            DbPage {
-                identifier: identifier,
-                filename: filename.to_owned(),
-                name: name,
-                html_content: html_content,
-                md_content: parsed_matter.content,
-                md_content_hash: file_md_content_hash,
-                tags: tags,
-                modified_datetime: final_modified_datetime,
-                created_datetime: final_created_datetime,
-            },
-            DbOperationReport::Update,
-        ));
-    } else {
-        // CREATING NEW PAGE IN DB
-
-        return Ok((
-            DbPage {
-                identifier: identifier,
-                filename: filename.to_owned(),
-                name: name,
-                html_content: html_content,
-                md_content: parsed_matter.content,
-                md_content_hash: file_md_content_hash,
-                tags: tags,
-                modified_datetime: final_modified_datetime,
-                created_datetime: final_created_datetime,
-            },
-            DbOperationReport::Insert,
-        ));
-    }
+    Ok(html_content)
 }
 
 fn resolve_datetime(
