@@ -1,11 +1,11 @@
 use crate::config::ChasquiConfig;
 use crate::database::PageRepository;
 use crate::domain::Page;
+use crate::io::ContentReader;
 use crate::parser::markdown::{compile_markdown_to_html, extract_frontmatter};
 use anyhow::{Context, Result};
-use chrono::{NaiveDateTime, Utc};
+use chrono::NaiveDateTime;
 use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -35,59 +35,70 @@ impl Manifest {
         }
     }
 
-    fn resolve_link(&self, link: &str) -> Option<String> {
-        // 1. Filter external and anchor-only links
-        if link.starts_with("http://")
-            || link.starts_with("https://")
-            || link.starts_with("mailto:")
-            || link.starts_with('#')
-        {
-            return Some(link.to_string());
+    // this function is called by the AST parser on all anchors.
+    // this function will give the AST parser links that will navigate to the identifier and catch
+    // errors
+    // this function will also ignore any external links or mailtos
+        fn resolve_link(&self, link: &str, config: &ChasquiConfig) -> String {
+            // filter external and anchor-only links
+            if link.starts_with("http://")
+                || link.starts_with("https://")
+                || link.starts_with("mailto:")
+                || link.starts_with('#')
+            {
+                return link.to_string();
+            }
+    
+            // normalize by stripping fragments
+            let parts: Vec<&str> = link.split('#').collect();
+            let lookup_key = parts[0];
+            let fragment = parts.get(1).map(|f| format!("#{}", f)).unwrap_or_default();
+    
+            println!("LinkResolver: Debugging link '{}'", link);
+            println!("LinkResolver:   Lookup Key: '{}'", lookup_key);
+    
+            // attempt to lookup the link by filename & identifier
+            let resolved_identifier =
+                if let Some(identifier) = self.filename_to_identifier.get(lookup_key) {
+                    println!(
+                        "LinkResolver:   Matched by filename! Resolved to identifier: '{}'",
+                        identifier
+                    );
+                    Some(identifier.clone())
+                } else if self.identifier_to_filename.contains_key(lookup_key) {
+                    println!("LinkResolver:   Matched by identifier!");
+                    Some(lookup_key.to_string())
+                } else {
+                    println!(
+                        "LinkResolver:   WARNING - FAILED to match '{}'. Link will remain as-is.",
+                        lookup_key
+                    );
+                    None
+                };
+    
+            // return the "fixed" link that will navigate to the page the writer intended, or the
+            // original if broken
+            match resolved_identifier {
+                Some(id) => {
+                    if config.serve_home && id == config.home_identifier {
+                        format!("/{}", fragment)
+                    } else {
+                        format!("/{}{}", id, fragment)
+                    }
+                }
+                None => link.to_string(),
+            }
         }
-
-        // 2. Normalize by stripping fragments for lookup
-        let parts: Vec<&str> = link.split('#').collect();
-        let lookup_key = parts[0];
-        let fragment = parts.get(1).map(|f| format!("#{}", f)).unwrap_or_default();
-
-        println!("LinkResolver: Debugging link '{}'", link);
-        println!("LinkResolver:   Lookup Key: '{}'", lookup_key);
-
-        // 3. Attempt dual-index lookup in the MANIFEST (The Map of the World)
-        let resolved_identifier =
-            if let Some(identifier) = self.filename_to_identifier.get(lookup_key) {
-                println!(
-                    "LinkResolver:   Matched by filename! Resolved to identifier: '{}'",
-                    identifier
-                );
-                Some(identifier.clone())
-            } else if self.identifier_to_filename.contains_key(lookup_key) {
-                println!("LinkResolver:   Matched by identifier!");
-                Some(lookup_key.to_string())
-            } else {
-                println!("LinkResolver:   FAILED to match. Checking manifest...");
-                println!(
-                    "LinkResolver:     Available Filenames: {:?}",
-                    self.filename_to_identifier.keys().collect::<Vec<_>>()
-                );
-                println!(
-                    "LinkResolver:     Available Identifiers: {:?}",
-                    self.identifier_to_filename.keys().collect::<Vec<_>>()
-                );
-                None
-            };
-
-        // 4. Return the "fixed" identifier with fragment preserved, or None if broken
-        resolved_identifier.map(|id| format!("{}{}", id, fragment))
     }
-}
+    
 
 struct SyncCache {
     pages_by_filename: HashMap<String, Page>,
 }
 
-pub struct SyncService<R: PageRepository> {
-    repo: R,
+pub struct SyncService {
+    repo: Box<dyn PageRepository>,
+    reader: Box<dyn ContentReader>,
     config: Arc<ChasquiConfig>,
     // The "Map of the World" - updated during the Discovery Pass
     manifest: RwLock<Manifest>,
@@ -95,9 +106,13 @@ pub struct SyncService<R: PageRepository> {
     cache: RwLock<SyncCache>,
 }
 
-impl<R: PageRepository> SyncService<R> {
+impl SyncService {
     // async because upon creation populates internal pages cache
-    pub async fn new(repo: R, config: Arc<ChasquiConfig>) -> Result<Self> {
+    pub async fn new(
+        repo: Box<dyn PageRepository>,
+        reader: Box<dyn ContentReader>,
+        config: Arc<ChasquiConfig>,
+    ) -> Result<Self> {
         println!("Orchestrator: Booting up and building internal cache...");
 
         // get all pages
@@ -121,6 +136,7 @@ impl<R: PageRepository> SyncService<R> {
 
         Ok(Self {
             repo,
+            reader,
             config,
             manifest: RwLock::new(manifest),
             cache: RwLock::new(SyncCache { pages_by_filename }),
@@ -135,19 +151,52 @@ impl<R: PageRepository> SyncService<R> {
 
         let filename = relative_path.to_string_lossy().replace("\\", "/");
 
-        // Shallow scan: read only enough to get frontmatter
-        let raw_markdown = fs::read_to_string(path)?;
+        // get frontmatter to determine identifier via reader
+        let raw_markdown = self.reader.read_to_string(path).await?;
         let (frontmatter, _) = extract_frontmatter(&raw_markdown, &filename)?;
 
-        let identifier = frontmatter.identifier.unwrap_or_else(|| {
-            relative_path
-                .with_extension("")
-                .to_string_lossy()
-                .replace("\\", "/")
-        });
+        let identifier = frontmatter
+            .identifier
+            .unwrap_or_else(|| generate_default_identifier(relative_path));
 
         let mut manifest_guard = self.manifest.write().await;
         manifest_guard.insert(filename, identifier);
+
+        Ok(())
+    }
+
+    /// Performs a complete synchronization of the content directory.
+    pub async fn full_sync(&self) -> Result<()> {
+        println!("Orchestrator: Performing full directory sync...");
+        let entries = self
+            .reader
+            .list_markdown_files(&self.config.content_dir)
+            .await
+            .context("Failed to list files for full sync")?;
+
+        self.process_batch(entries, Vec::new()).await
+    }
+
+    /// Processes a batch of file changes and deletions atomically to ensure consistency.
+    pub async fn process_batch(
+        &self,
+        changes: Vec<std::path::PathBuf>,
+        deletions: Vec<std::path::PathBuf>,
+    ) -> Result<()> {
+        // 1. Priority: Purge Deletions
+        for path in deletions {
+            self.handle_file_deleted(&path).await?;
+        }
+
+        // 2. Priority: Discovery Pass (Register all changes to Manifest)
+        for path in &changes {
+            self.register_file_to_manifest(path).await?;
+        }
+
+        // 3. Priority: Ingestion Pass (Compile and Save)
+        for path in changes {
+            self.handle_file_changed(&path).await?;
+        }
 
         Ok(())
     }
@@ -175,8 +224,19 @@ impl<R: PageRepository> SyncService<R> {
     }
 
     pub async fn get_page_by_identifier(&self, identifier: &str) -> Option<Page> {
+        // Normalize: if someone asks for "", "/", or the home_identifier, give them the home page if enabled
+        let lookup_key = if self.config.serve_home
+            && (identifier.is_empty()
+                || identifier == "/"
+                || identifier == self.config.home_identifier)
+        {
+            &self.config.home_identifier
+        } else {
+            identifier
+        };
+
         let manifest_guard = self.manifest.read().await;
-        let filename = manifest_guard.identifier_to_filename.get(identifier)?;
+        let filename = manifest_guard.identifier_to_filename.get(lookup_key)?;
 
         let cache_guard = self.cache.read().await;
         cache_guard.pages_by_filename.get(filename).cloned()
@@ -197,30 +257,25 @@ impl<R: PageRepository> SyncService<R> {
 
         let filename = relative_path.to_string_lossy().replace("\\", "/");
 
-        let raw_markdown = fs::read_to_string(path)
+        let raw_markdown = self
+            .reader
+            .read_to_string(path)
+            .await
             .with_context(|| format!("Failed to read markdown file: {}", path.display()))?;
 
-        // get os metadata for fallback dates
-        let metadata = fs::metadata(path)?;
-        let os_modified = metadata
-            .modified()
-            .ok()
-            .map(|t| chrono::DateTime::<Utc>::from(t).naive_utc());
-        let os_created = metadata
-            .created()
-            .ok()
-            .map(|t| chrono::DateTime::<Utc>::from(t).naive_utc());
+        // get os metadata for fallback dates via reader
+        let metadata = self.reader.get_metadata(path).await?;
+        let os_modified = metadata.modified;
+        let os_created = metadata.created;
 
         // extract the frontmatter
         let (frontmatter, content_body) = extract_frontmatter(&raw_markdown, &filename)?;
 
         // resolve identifier early for manifest registration
-        let identifier = frontmatter.identifier.clone().unwrap_or_else(|| {
-            relative_path
-                .with_extension("")
-                .to_string_lossy()
-                .replace("\\", "/")
-        });
+        let identifier = frontmatter
+            .identifier
+            .clone()
+            .unwrap_or_else(|| generate_default_identifier(relative_path));
 
         // Discovery stage: Update manifest immediately so other files can link to this one
         {
@@ -232,8 +287,9 @@ impl<R: PageRepository> SyncService<R> {
         let manifest_guard = self.manifest.read().await;
 
         // compile the markdown with on-the-fly link resolution using the MANIFEST
-        let html_content =
-            compile_markdown_to_html(&content_body, |link| manifest_guard.resolve_link(link))?;
+        let html_content = compile_markdown_to_html(&content_body, |link| {
+            manifest_guard.resolve_link(link, &self.config)
+        })?;
 
         // hash md content
         let md_content_hash = format!(
@@ -246,6 +302,7 @@ impl<R: PageRepository> SyncService<R> {
         let created_datetime = resolve_datetime(frontmatter.created_datetime, os_created);
 
         println!("Successfully processed and saved {}", filename);
+        println!("Generated HTML for {}:\n{}", identifier, html_content);
 
         let page = Page {
             identifier,
@@ -272,11 +329,9 @@ impl<R: PageRepository> SyncService<R> {
     }
 
     pub async fn handle_file_deleted(&self, path: &Path) -> Result<()> {
-        let filename = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .context("Invalid file path")?
-            .to_string();
+        let relative_path = path.strip_prefix(&self.config.content_dir).unwrap_or(path);
+
+        let filename = relative_path.to_string_lossy().replace("\\", "/");
 
         self.repo.delete_page(&filename).await?;
 
@@ -286,6 +341,13 @@ impl<R: PageRepository> SyncService<R> {
 
         Ok(())
     }
+}
+
+fn generate_default_identifier(relative_path: &std::path::Path) -> String {
+    relative_path
+        .with_extension("")
+        .to_string_lossy()
+        .replace("\\", "/")
 }
 
 fn resolve_datetime(
