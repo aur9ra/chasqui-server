@@ -26,7 +26,7 @@ pub struct JsonPage {
     pub html_content: String,
     pub md_content: String,
     pub md_content_hash: String,
-    pub tags: Option<String>,
+    pub tags: Vec<String>,
     pub modified_datetime: Option<String>,
     pub created_datetime: Option<String>,
 }
@@ -90,12 +90,6 @@ impl From<&Page> for JsonPage {
             .created_datetime
             .map(|dt| dt.format(format).to_string());
 
-        let tags_str = if page.tags.is_empty() {
-            None
-        } else {
-            Some(serde_json::to_string(&page.tags).unwrap_or_default())
-        };
-
         JsonPage {
             identifier: page.identifier.clone(),
             filename: page.filename.clone(),
@@ -103,7 +97,7 @@ impl From<&Page> for JsonPage {
             html_content: page.html_content.clone(),
             md_content: page.md_content.clone(),
             md_content_hash: page.md_content_hash.clone(),
-            tags: tags_str,
+            tags: page.tags.clone(),
             modified_datetime,
             created_datetime,
         }

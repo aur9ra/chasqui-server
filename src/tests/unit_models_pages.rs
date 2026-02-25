@@ -73,10 +73,8 @@ fn test_page_to_json_page_formatting() {
         json_page.modified_datetime,
         Some("2023-01-01 12:00:00".to_string())
     );
-    // verify tags are still a JSON string for the API
-    // TODO: this will have to change when i make the json page not have a json string. what was i
-    // doing lmao
-    assert_eq!(json_page.tags, Some(r#"["rust","api"]"#.to_string()));
+    // verify tags are a native vector for the API
+    assert_eq!(json_page.tags, vec!["rust".to_string(), "api".to_string()]);
 }
 
 // to be honest i don't know why this is here
