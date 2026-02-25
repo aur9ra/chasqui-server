@@ -2,6 +2,7 @@ use crate::database::PageRepository;
 use crate::domain::Page;
 use crate::features::pages::model::DbPage;
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use sqlx::{Pool, Sqlite};
 
 pub struct SqliteRepository {
@@ -14,6 +15,7 @@ impl SqliteRepository {
     }
 }
 
+#[async_trait]
 impl PageRepository for SqliteRepository {
     async fn get_page_by_identifier(&self, id: &str) -> Result<Option<Page>> {
         // query the database for the DbPage
