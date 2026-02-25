@@ -1,28 +1,26 @@
 use crate::config::ChasquiConfig;
-use crate::features::pages::model::DbOperationReport;
-use crate::features::pages::model::DbPage;
-use crate::features::pages::repo::{
-    build_valid_files_set, get_entry_by_filename, get_pages_from_db, process_md_dir,
-    process_page_operations, process_single_file,
-};
+use crate::database::sqlite::SqliteRepository;
+use crate::services::sync::SyncService;
 use notify::{EventKind, RecursiveMode, Watcher};
 use reqwest::Client;
-use sqlx::{Pool, Sqlite};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::mpsc;
+use walkdir;
 
 // what operations does our async worker know?
 enum SyncCommand {
     SingleFile(PathBuf),
     DeleteFile(PathBuf),
-    FullSync,
 }
 
 /// Spawns a background task that watches for file changes and syncs the database.
-pub fn start_directory_watcher(pool: Pool<Sqlite>, config: Arc<ChasquiConfig>) {
+pub fn start_directory_watcher(
+    sync_service: Arc<SyncService<SqliteRepository>>,
+    config: Arc<ChasquiConfig>,
+) {
     // the conveyor belt
     let (tx, mut rx) = mpsc::channel::<SyncCommand>(100);
 
@@ -71,6 +69,8 @@ pub fn start_directory_watcher(pool: Pool<Sqlite>, config: Arc<ChasquiConfig>) {
         .expect("Failed to watch content directory");
 
     // generate a worker to process reciever
+    let worker_sync_service = sync_service.clone(); // Clone for the spawned task
+    let worker_config = config.clone(); // Clone for the spawned task
     tokio::spawn(async move {
         let _kept_alive_watcher = watcher;
         let http_client = Client::new();
@@ -85,18 +85,19 @@ pub fn start_directory_watcher(pool: Pool<Sqlite>, config: Arc<ChasquiConfig>) {
             if needs_full_sync.swap(false, Ordering::SeqCst) {
                 println!("Executing Fallback Full Directory Sync...");
 
-                // process file logic
-                if let Ok(db_pages) = get_pages_from_db(&pool).await {
-                    let borrowable_db_pages: Vec<&DbPage> = db_pages.iter().collect();
-
-                    if let Ok(page_operations) =
-                        process_md_dir(&config.content_dir, borrowable_db_pages, &config)
+                // iterate through content directory and process all files
+                for entry in walkdir::WalkDir::new(&worker_config.content_dir)
+                    .into_iter()
+                    .filter_map(|e| e.ok())
+                {
+                    if entry.file_type().is_file()
+                        && entry.path().extension().and_then(|s| s.to_str()) == Some("md")
                     {
-                        if process_page_operations(&pool, page_operations)
-                            .await
-                            .is_ok()
-                        {
-                            sync_occurred = true;
+                        let path = entry.into_path();
+                        if let Err(e) = worker_sync_service.handle_file_changed(&path).await {
+                            eprintln!("Error during full sync of {}: {}", path.display(), e);
+                        } else {
+                            sync_occurred = true; // Mark sync as occurred if at least one file is processed successfully
                         }
                     }
                 }
@@ -108,42 +109,26 @@ pub fn start_directory_watcher(pool: Pool<Sqlite>, config: Arc<ChasquiConfig>) {
                     // handle updates
                     SyncCommand::SingleFile(path) => {
                         println!("Processing single file change: {:?}", path);
-                        let relative_path = path.strip_prefix(&config.content_dir).unwrap_or(&path);
-                        let filename = relative_path.to_string_lossy().to_string();
-
-                        if let Ok(db_page_opt) = get_entry_by_filename(&filename, &pool).await {
-                            let valid_files = build_valid_files_set(&config.content_dir);
-                            if let Ok(operation_report) =
-                                process_single_file(&path, db_page_opt, &config, &valid_files)
-                            {
-                                let ops = vec![operation_report];
-                                if process_page_operations(&pool, ops).await.is_ok() {
-                                    sync_occurred = true;
-                                }
-                            }
+                        if let Err(e) = worker_sync_service.handle_file_changed(&path).await {
+                            eprintln!("Error processing file change {}: {}", path.display(), e);
+                        } else {
+                            sync_occurred = true;
                         }
                     }
                     // handle deletions
                     SyncCommand::DeleteFile(path) => {
                         println!("Processing single file deletion: {:?}", path);
-                        let relative_path = path.strip_prefix(&config.content_dir).unwrap_or(&path);
-                        let filename = relative_path.to_string_lossy().to_string();
-
-                        // query to see if this file even existed in the DB
-                        if let Ok(Some(db_page)) = get_entry_by_filename(&filename, &pool).await {
-                            // package it for deletion
-                            let ops = vec![(db_page, DbOperationReport::Delete)];
-                            if process_page_operations(&pool, ops).await.is_ok() {
-                                sync_occurred = true;
-                            }
+                        if let Err(e) = worker_sync_service.handle_file_deleted(&path).await {
+                            eprintln!("Error processing file deletion {}: {}", path.display(), e);
+                        } else {
+                            sync_occurred = true;
                         }
                     }
-                    SyncCommand::FullSync => {}
                 }
             }
 
             if sync_occurred {
-                trigger_frontend_build(&http_client, &config.webhook_url, &config.webhook_secret)
+                trigger_frontend_build(&http_client, &worker_config.webhook_url, &worker_config.webhook_secret)
                     .await;
             }
 

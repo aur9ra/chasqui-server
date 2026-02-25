@@ -20,51 +20,23 @@ async fn get_page_handler(
     State(state): State<AppState>,
     Path(slug): Path<String>,
 ) -> Result<Json<model::JsonPage>, StatusCode> {
-    let page_option = repo::get_entry_by_identifier(&slug, &state.pool).await;
+    let page_option = state.sync_service.get_page_by_identifier(&slug).await;
 
     match page_option {
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
-
-        Ok(None) => Err(StatusCode::NOT_FOUND),
-
-        Ok(Some(page)) => Ok(Json(db_page_to_json_page(&page, "%Y-%m-%d %H:%M:%S"))), // Ok(Json(page))
+        None => Err(StatusCode::NOT_FOUND),
+        Some(page) => {
+            let json_page: model::JsonPage = (&page).into();
+            Ok(Json(json_page))
+        }
     }
 }
 
 async fn list_pages_handler(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<model::JsonPage>>, StatusCode> {
-    let db_pages = repo::get_pages_from_db(&state.pool)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let db_pages = state.sync_service.get_all_pages().await;
 
-    let json_pages: Vec<model::JsonPage> = db_pages
-        .into_iter()
-        .map(|p| db_page_to_json_page(&p, "%Y-%m-%d %H:%M:%S"))
-        .collect();
+    let json_pages: Vec<model::JsonPage> = db_pages.iter().map(|p| p.into()).collect();
 
     Ok(Json(json_pages))
-}
-
-fn db_page_to_json_page(dbpage: &DbPage, format: &str) -> JsonPage {
-    let modified_datetime: Option<String> = match dbpage.modified_datetime {
-        Some(val) => Some(val.format(format).to_string()),
-        None => None,
-    };
-    let created_datetime: Option<String> = match dbpage.created_datetime {
-        Some(val) => Some(val.format(format).to_string()),
-        None => None,
-    };
-
-    JsonPage {
-        identifier: dbpage.identifier.to_owned(),
-        filename: dbpage.filename.to_owned(),
-        name: dbpage.name.to_owned(),
-        html_content: dbpage.html_content.to_owned(),
-        md_content: dbpage.md_content.to_owned(),
-        md_content_hash: dbpage.md_content_hash.to_owned(),
-        tags: dbpage.tags.to_owned(),
-        modified_datetime: modified_datetime,
-        created_datetime: created_datetime,
-    }
 }

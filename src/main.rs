@@ -1,22 +1,26 @@
 use crate::config::ChasquiConfig;
-use crate::features::pages::model::DbPage;
-use crate::features::pages::repo::{get_pages_from_db, process_md_dir, process_page_operations};
+use crate::database::sqlite::SqliteRepository;
 use crate::features::watcher::start_directory_watcher;
+use crate::services::sync::SyncService;
 use axum::Router;
 use dotenv;
 use sqlx::Sqlite;
 use sqlx::migrate::MigrateDatabase;
 use sqlx::sqlite::SqlitePoolOptions;
-use std::path::Path;
 use std::sync::Arc;
 use tower_http::services::ServeDir;
+use walkdir;
 
 pub mod config;
+pub mod database;
+pub mod domain;
 mod features;
+pub mod services;
+pub mod parser;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub pool: sqlx::Pool<Sqlite>,
+    pub sync_service: Arc<SyncService<SqliteRepository>>,
     pub config: Arc<ChasquiConfig>,
 }
 
@@ -47,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
         };
     }
 
-    // connect to our db
+    // connect to db
     let pool = match SqlitePoolOptions::new()
         .max_connections(config.max_connections)
         .connect(&config.database_url)
@@ -59,30 +63,44 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    // initialize database access via desired database implementation
+    let repository = SqliteRepository::new(pool.clone());
+
+    // sync_service holds an in-memory hashmap of our database.
+    // reading from this (rather, asking it for stuff) is much quicker than reading from sqlx.
+    let sync_service = SyncService::new(repository)
+        .await
+        .expect("Failed to initialize SyncService");
+    let shared_sync_service = Arc::new(sync_service);
+
+    let app_state = AppState {
+        sync_service: shared_sync_service.clone(),
+        config: shared_config.clone(),
+    };
+
     // run migrations
     sqlx::migrate!()
         .run(&pool)
         .await
         .expect("Failed to run database migrations.");
 
-    let app_state = AppState {
-        pool: pool.clone(),
-        config: shared_config.clone(),
-    };
-
-    // init pages, sync with db
-    let md_path = Path::new("./content/md");
-    let db_pages = get_pages_from_db(&pool).await.unwrap();
-    let borrowable_db_pages: Vec<&DbPage> = db_pages.iter().collect();
-    let page_operations = process_md_dir(md_path, borrowable_db_pages, &config).unwrap();
-    process_page_operations(&pool, page_operations)
-        .await
-        .unwrap();
-
-    println!("Sync complete.");
+    // Initial sync of content directory
+    println!("Starting initial content sync...");
+    let content_dir = &shared_config.content_dir;
+    for entry in walkdir::WalkDir::new(content_dir).into_iter().filter_map(|e| e.ok()) {
+        if entry.file_type().is_file()
+            && entry.path().extension().and_then(|s| s.to_str()) == Some("md")
+        {
+            let path = entry.into_path();
+            if let Err(e) = shared_sync_service.handle_file_changed(&path).await {
+                eprintln!("Error during initial sync of {}: {}", path.display(), e);
+            }
+        }
+    }
+    println!("Initial content sync complete.");
 
     // start background file watcher
-    start_directory_watcher(pool.clone(), shared_config.clone());
+    start_directory_watcher(shared_sync_service.clone(), shared_config.clone());
 
     println!("Starting server...");
 

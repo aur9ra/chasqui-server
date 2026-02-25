@@ -1,0 +1,1379 @@
+diff --git a/src/database/mod.rs b/src/database/mod.rs
+new file mode 100644
+index 0000000..5ee2cb9
+--- /dev/null
++++ b/src/database/mod.rs
+@@ -0,0 +1,18 @@
++use crate::domain::Page;
++use anyhow::Result;
++
++pub mod sqlite;
++
++// a pagerepository can be shared between threads (referencable)
++// sqlx::Pool is thread safe
++// generic implementation of page operations, db specific implementations in "sqlite.rs", future:
++// "postgresql.rs", "mysql.rs"
++pub trait PageRepository: Send + Sync {
++    async fn get_page_by_identifier(&self, id: &str) -> Result<Option<Page>>;
++    async fn get_page_by_filename(&self, filename: &str) -> Result<Option<Page>>;
++    async fn get_all_pages(&self) -> Result<Vec<Page>>;
++
++    // write operations
++    async fn save_page(&self, page: &Page) -> Result<()>;
++    async fn delete_page(&self, filename: &str) -> Result<()>;
++}
+diff --git a/src/database/sqlite.rs b/src/database/sqlite.rs
+new file mode 100644
+index 0000000..ad997a0
+--- /dev/null
++++ b/src/database/sqlite.rs
+@@ -0,0 +1,113 @@
++use crate::database::PageRepository;
++use crate::domain::Page;
++use crate::features::pages::model::DbPage;
++use anyhow::{Context, Result};
++use sqlx::{Pool, Sqlite};
++
++pub struct SqliteRepository {
++    pool: Pool<Sqlite>,
++}
++
++impl SqliteRepository {
++    pub fn new(pool: Pool<Sqlite>) -> Self {
++        Self { pool }
++    }
++}
++
++impl PageRepository for SqliteRepository {
++    async fn get_page_by_identifier(&self, id: &str) -> Result<Option<Page>> {
++        // query the database for the DbPage
++        let db_page_opt =
++            sqlx::query_as::<_, DbPage>("SELECT * FROM pages WHERE identifier LIKE ?")
++                .bind(id)
++                .fetch_optional(&self.pool)
++                .await?;
++
++        // translate to pure Page model
++        match db_page_opt {
++            Some(db_page) => {
++                let page: Page = db_page.try_into()?;
++                Ok(Some(page))
++            }
++            None => Ok(None),
++        }
++    }
++
++    async fn get_page_by_filename(&self, filename: &str) -> Result<Option<Page>> {
++        let db_page_opt = sqlx::query_as::<_, DbPage>("SELECT * FROM pages WHERE filename = ?")
++            .bind(filename)
++            .fetch_optional(&self.pool)
++            .await?;
++
++        match db_page_opt {
++            Some(db_page) => {
++                let page: Page = db_page.try_into()?;
++                Ok(Some(page))
++            }
++            None => Ok(None),
++        }
++    }
++
++    async fn get_all_pages(&self) -> Result<Vec<Page>> {
++        let db_pages = sqlx::query_as::<_, DbPage>("SELECT * FROM pages")
++            .fetch_all(&self.pool)
++            .await?;
++
++        let mut pages = Vec::new();
++        for db_page in db_pages {
++            let page: Page = db_page.try_into()?;
++            pages.push(page);
++        }
++
++        Ok(pages)
++    }
++
++    async fn save_page(&self, page: &Page) -> Result<()> {
++        // translate the pure Page down into a DbPage for SQLite
++        let db_page: DbPage = page.into();
++
++        // nifty UPSERT
++        // it's important to have the db do the insert/update
++        sqlx::query!(
++            r#"
++            INSERT INTO pages (
++                identifier, filename, name, html_content, md_content, 
++                md_content_hash, tags, modified_datetime, created_datetime
++            )
++            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
++            ON CONFLICT(filename) DO UPDATE SET
++                identifier = excluded.identifier,
++                name = excluded.name,
++                html_content = excluded.html_content,
++                md_content = excluded.md_content,
++                md_content_hash = excluded.md_content_hash,
++                tags = excluded.tags,
++                modified_datetime = excluded.modified_datetime,
++                created_datetime = excluded.created_datetime
++            "#,
++            db_page.identifier,
++            db_page.filename,
++            db_page.name,
++            db_page.html_content,
++            db_page.md_content,
++            db_page.md_content_hash,
++            db_page.tags,
++            db_page.modified_datetime,
++            db_page.created_datetime
++        )
++        .execute(&self.pool)
++        .await
++        .context(format!("Failed to save page {}", page.filename))?;
++
++        Ok(())
++    }
++
++    async fn delete_page(&self, filename: &str) -> Result<()> {
++        sqlx::query!("DELETE FROM pages WHERE filename = ?", filename)
++            .execute(&self.pool)
++            .await
++            .context(format!("Failed to delete page {}", filename))?;
++
++        Ok(())
++    }
++}
+diff --git a/src/domain/mod.rs b/src/domain/mod.rs
+new file mode 100644
+index 0000000..21111e7
+--- /dev/null
++++ b/src/domain/mod.rs
+@@ -0,0 +1,3 @@
++pub mod page;
++
++pub use page::Page;
+diff --git a/src/domain/page.rs b/src/domain/page.rs
+new file mode 100644
+index 0000000..a71c00e
+--- /dev/null
++++ b/src/domain/page.rs
+@@ -0,0 +1,14 @@
++use chrono::NaiveDateTime;
++
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct Page {
++    pub identifier: String,
++    pub filename: String,
++    pub name: Option<String>,
++    pub html_content: String,
++    pub md_content: String,
++    pub md_content_hash: String,
++    pub tags: Vec<String>,
++    pub modified_datetime: Option<NaiveDateTime>,
++    pub created_datetime: Option<NaiveDateTime>,
++}
+diff --git a/src/features/pages/mod.rs b/src/features/pages/mod.rs
+index 100e6e9..de903d4 100644
+--- a/src/features/pages/mod.rs
++++ b/src/features/pages/mod.rs
+@@ -20,51 +20,23 @@ async fn get_page_handler(
+     State(state): State<AppState>,
+     Path(slug): Path<String>,
+ ) -> Result<Json<model::JsonPage>, StatusCode> {
+-    let page_option = repo::get_entry_by_identifier(&slug, &state.pool).await;
++    let page_option = state.sync_service.get_page_by_identifier(&slug).await;
+ 
+     match page_option {
+-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+-
+-        Ok(None) => Err(StatusCode::NOT_FOUND),
+-
+-        Ok(Some(page)) => Ok(Json(db_page_to_json_page(&page, "%Y-%m-%d %H:%M:%S"))), // Ok(Json(page))
++        None => Err(StatusCode::NOT_FOUND),
++        Some(page) => {
++            let json_page: model::JsonPage = (&page).into();
++            Ok(Json(json_page))
++        }
+     }
+ }
+ 
+ async fn list_pages_handler(
+     State(state): State<AppState>,
+ ) -> Result<Json<Vec<model::JsonPage>>, StatusCode> {
+-    let db_pages = repo::get_pages_from_db(&state.pool)
+-        .await
+-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
++    let db_pages = state.sync_service.get_all_pages().await;
+ 
+-    let json_pages: Vec<model::JsonPage> = db_pages
+-        .into_iter()
+-        .map(|p| db_page_to_json_page(&p, "%Y-%m-%d %H:%M:%S"))
+-        .collect();
++    let json_pages: Vec<model::JsonPage> = db_pages.iter().map(|p| p.into()).collect();
+ 
+     Ok(Json(json_pages))
+ }
+-
+-fn db_page_to_json_page(dbpage: &DbPage, format: &str) -> JsonPage {
+-    let modified_datetime: Option<String> = match dbpage.modified_datetime {
+-        Some(val) => Some(val.format(format).to_string()),
+-        None => None,
+-    };
+-    let created_datetime: Option<String> = match dbpage.created_datetime {
+-        Some(val) => Some(val.format(format).to_string()),
+-        None => None,
+-    };
+-
+-    JsonPage {
+-        identifier: dbpage.identifier.to_owned(),
+-        filename: dbpage.filename.to_owned(),
+-        name: dbpage.name.to_owned(),
+-        html_content: dbpage.html_content.to_owned(),
+-        md_content: dbpage.md_content.to_owned(),
+-        md_content_hash: dbpage.md_content_hash.to_owned(),
+-        tags: dbpage.tags.to_owned(),
+-        modified_datetime: modified_datetime,
+-        created_datetime: created_datetime,
+-    }
+-}
+diff --git a/src/features/pages/model.rs b/src/features/pages/model.rs
+index 60099b8..eaa26cf 100644
+--- a/src/features/pages/model.rs
++++ b/src/features/pages/model.rs
+@@ -1,3 +1,5 @@
++use crate::domain::Page;
++use anyhow::{Context, Result};
+ use chrono::NaiveDateTime;
+ use derive_more::derive::Display;
+ use serde::{Deserialize, Serialize};
+@@ -29,9 +31,81 @@ pub struct JsonPage {
+     pub created_datetime: Option<String>,
+ }
+ 
+-pub enum DbOperationReport {
+-    NoChange,
+-    Update,
+-    Delete,
+-    Insert,
++impl TryFrom<DbPage> for Page {
++    type Error = anyhow::Error;
++
++    // try to convert
++    fn try_from(db_page: DbPage) -> Result<Self, Self::Error> {
++        let parsed_tags: Vec<String> = match db_page.tags {
++            Some(tags_str) => serde_json::from_str(&tags_str).context(format!(
++                "Failed to parse JSON tags for {}",
++                db_page.filename
++            ))?,
++            None => Vec::new(),
++        };
++
++        Ok(Page {
++            identifier: db_page.identifier,
++            filename: db_page.filename,
++            name: db_page.name,
++            html_content: db_page.html_content,
++            md_content: db_page.md_content,
++            md_content_hash: db_page.md_content_hash,
++            tags: parsed_tags,
++            modified_datetime: db_page.modified_datetime,
++            created_datetime: db_page.created_datetime,
++        })
++    }
++}
++
++impl From<&Page> for DbPage {
++    fn from(page: &Page) -> Self {
++        let tags_str = if page.tags.is_empty() {
++            None
++        } else {
++            Some(serde_json::to_string(&page.tags).unwrap_or_default())
++        };
++
++        DbPage {
++            identifier: page.identifier.clone(),
++            filename: page.filename.clone(),
++            name: page.name.clone(),
++            html_content: page.html_content.clone(),
++            md_content: page.md_content.clone(),
++            md_content_hash: page.md_content_hash.clone(),
++            tags: tags_str,
++            modified_datetime: page.modified_datetime,
++            created_datetime: page.created_datetime,
++        }
++    }
++}
++
++impl From<&Page> for JsonPage {
++    fn from(page: &Page) -> Self {
++        let format = "%Y-%m-%d %H:%M:%S";
++        let modified_datetime = page
++            .modified_datetime
++            .map(|dt| dt.format(format).to_string());
++        let created_datetime = page
++            .created_datetime
++            .map(|dt| dt.format(format).to_string());
++
++        let tags_str = if page.tags.is_empty() {
++            None
++        } else {
++            Some(serde_json::to_string(&page.tags).unwrap_or_default())
++        };
++
++        JsonPage {
++            identifier: page.identifier.clone(),
++            filename: page.filename.clone(),
++            name: page.name.clone(),
++            html_content: page.html_content.clone(),
++            md_content: page.md_content.clone(),
++            md_content_hash: page.md_content_hash.clone(),
++            tags: tags_str,
++            modified_datetime,
++            created_datetime,
++        }
++    }
+ }
+diff --git a/src/features/pages/repo.rs b/src/features/pages/repo.rs
+index ea90763..c666fb9 100644
+--- a/src/features/pages/repo.rs
++++ b/src/features/pages/repo.rs
+@@ -1,554 +1,3 @@
+-use crate::ChasquiConfig;
+-use crate::features::pages::model::{DbOperationReport, DbPage};
+-use anyhow::{Result, anyhow};
+-use gray_matter::{Matter, engine::YAML};
+-use pulldown_cmark::{Event, Options as CmarkOptions, Parser, Tag, html};
+-use serde::Deserialize;
+-use sqlx::types::chrono::NaiveDateTime;
+-use sqlx::{Pool, Sqlite};
+-use std::collections::{HashMap, HashSet};
+-use std::path::{Path, PathBuf};
+-use std::sync::OnceLock;
+-use std::{env, fs};
+-use walkdir::WalkDir;
+-use xxhash_rust::xxh3::xxh3_64;
+-
+-#[derive(Deserialize, Debug, Default)]
+-struct PageFrontMatter {
+-    identifier: Option<String>,
+-    name: Option<String>,
+-    tags: Option<Vec<String>>,
+-    modified_datetime: Option<String>,
+-    created_datetime: Option<String>,
+-}
+-
+-pub async fn get_entry_by_identifier(
+-    identifier: &str,
+-    pool: &Pool<Sqlite>,
+-) -> sqlx::Result<Option<DbPage>> {
+-    sqlx::query_as::<_, DbPage>(
+-        r#"
+-        SELECT * FROM pages WHERE identifier LIKE ?
+-        "#,
+-    )
+-    .bind(identifier)
+-    .fetch_optional(pool)
+-    .await
+-}
+-
+-pub async fn get_entry_by_filename(
+-    filename: &str,
+-    pool: &Pool<Sqlite>,
+-) -> sqlx::Result<Option<DbPage>> {
+-    sqlx::query_as::<_, DbPage>(
+-        r#"
+-        SELECT * FROM pages WHERE filename = ?
+-        "#,
+-    )
+-    .bind(filename)
+-    .fetch_optional(pool)
+-    .await
+-}
+-
+-pub async fn get_pages_from_db(pool: &Pool<Sqlite>) -> sqlx::Result<Vec<DbPage>> {
+-    let get_pages_status = sqlx::query_as!(DbPage, r#"SELECT 
+-                                                        identifier,
+-                                                        filename,
+-                                                        name,
+-                                                        html_content,
+-                                                        md_content,
+-                                                        md_content_hash,
+-                                                        tags,
+-                                                        modified_datetime as "modified_datetime: NaiveDateTime",
+-                                                        created_datetime as "created_datetime: NaiveDateTime"
+-                                                    FROM pages"#).fetch_all(pool).await?;
+-    Ok(get_pages_status)
+-}
+-
+-pub fn build_valid_files_set(content_dir: &Path) -> HashSet<String> {
+-    let mut valid_files = HashSet::new();
+-
+-    // we only care about successful reads, filter_map over Ok()
+-    for entry in WalkDir::new(content_dir).into_iter().filter_map(|e| e.ok()) {
+-        if entry.file_type().is_file()
+-            && entry.path().extension().and_then(|s| s.to_str()) == Some("md")
+-        {
+-            if let Ok(relative) = entry.path().strip_prefix(content_dir) {
+-                // normalize to forward slashes for cross-platform consistency
+-                let normalized = relative.to_string_lossy().replace("\\", "/");
+-                valid_files.insert(normalized);
+-            }
+-        }
+-    }
+-    valid_files
+-}
+-
+-pub fn process_md_dir(
+-    md_path: &Path,
+-    pages_from_db: Vec<&DbPage>,
+-    config: &ChasquiConfig,
+-) -> Result<Vec<(DbPage, DbOperationReport)>> {
+-    let mut page_operations: Vec<(DbPage, DbOperationReport)> = Vec::new();
+-    let db_pages_map = pages_to_hashmap(pages_from_db);
+-
+-    // build the set of valid files
+-    let valid_files = build_valid_files_set(md_path);
+-
+-    for result_entry in WalkDir::new(md_path) {
+-        let entry = match result_entry {
+-            Ok(val) => val,
+-            Err(_) => continue,
+-        };
+-
+-        if !entry.file_type().is_file() {
+-            continue;
+-        }
+-        if entry.path().extension().and_then(|s| s.to_str()) != Some("md") {
+-            continue;
+-        }
+-
+-        // We use config.content_dir to safely strip the prefix
+-        let relative_path = entry
+-            .path()
+-            .strip_prefix(&config.content_dir)
+-            .unwrap_or(entry.path());
+-        let filename = relative_path.to_string_lossy().to_string();
+-
+-        let db_page_opt = db_pages_map.get(&filename).cloned();
+-
+-        // 3. Pass the config and the valid_files set into the single file processor
+-        match process_single_file(entry.path(), db_page_opt, config, &valid_files) {
+-            Ok(page_report) => {
+-                page_operations.push(page_report);
+-            }
+-            Err(e) => {
+-                eprintln!("Error occurred processing page {}: {}", filename, e);
+-            }
+-        };
+-    }
+-
+-    // look for page deletions
+-    for (filename, db_page) in db_pages_map {
+-        if !valid_files.contains(filename) {
+-            println!(
+-                "Ghost file detected in db, marking {} for deletion.",
+-                filename
+-            );
+-            page_operations.push((db_page.clone(), DbOperationReport::Delete));
+-        }
+-    }
+-
+-    Ok(page_operations)
+-}
+-
+-// process a directory entry, identify if it's a page, and identify necessary action
+-// additionally, report which db operation is appropriate (single responsibility)
+-// returns error if unable to read file, unable to process frontmatter, or any links to other pages are broken
+-//  TODO: break this function down! this is huge
+-pub fn process_single_file(
+-    path: &Path,
+-    db_page_opt: Option<DbPage>,
+-    config: &ChasquiConfig,
+-    valid_files: &HashSet<String>,
+-) -> Result<(DbPage, DbOperationReport)> {
+-    // 1. Read file from disk
+-    let md_content = fs::read_to_string(path)
+-        .map_err(|e| anyhow!("Unable to read file {}: {}", path.display(), e))?;
+-
+-    // 2. Resolve relative path safely using config
+-    let relative_path = path.strip_prefix(&config.content_dir).unwrap_or(path);
+-    let filename = relative_path.to_string_lossy().to_string();
+-
+-    // 3. Extract OS metadata
+-    let metadata_result = fs::metadata(path);
+-    let os_modified =
+-        get_property_from_metadata(&metadata_result, &MetadataDateTimeOptions::Modified).ok();
+-    let os_created =
+-        get_property_from_metadata(&metadata_result, &MetadataDateTimeOptions::Created).ok();
+-
+-    // 4. Pass ingredients to the pure core
+-    parse_markdown_to_db_page(
+-        &filename,
+-        &md_content,
+-        os_modified,
+-        os_created,
+-        db_page_opt,
+-        config,
+-        valid_files,
+-    )
+-}
+-
+-// extracts YAML frontmatter and returns the typed metadata alongside the raw markdown body
+-fn extract_frontmatter(md_content: &str, filename: &str) -> Result<(PageFrontMatter, String)> {
+-    let matter = Matter::<YAML>::new();
+-
+-    // explicitly tell 'parse' with epic turbofish syntax to use our PageFrontMatter struct for <D>
+-    let parsed_matter = matter
+-        .parse::<PageFrontMatter>(md_content)
+-        .map_err(|e| anyhow!("Failed to parse frontmatter in {}: {}", filename, e))?;
+-
+-    let frontmatter = parsed_matter.data.unwrap_or_default();
+-
+-    Ok((frontmatter, parsed_matter.content))
+-}
+-
+-// compiles markdown content into HTML, explicitly validating and rewriting internal links
+-// if a link is broken, compilation immediately halts and returns an Error
+-fn compile_markdown_to_html(
+-    current_file_path: &Path,
+-    filename: &str,
+-    markdown_content: &str,
+-    valid_files: &HashSet<String>,
+-) -> Result<String> {
+-    let mut options = CmarkOptions::empty();
+-    options.insert(CmarkOptions::ENABLE_STRIKETHROUGH);
+-    options.insert(CmarkOptions::ENABLE_TABLES);
+-
+-    let parser = Parser::new_ext(markdown_content, options);
+-    let mut rewrote_events = Vec::new();
+-
+-    // iterate over the event stream
+-    for event in parser {
+-        match event {
+-            // is this the start of a link?
+-            Event::Start(Tag::Link {
+-                link_type,
+-                dest_url,
+-                title,
+-                id,
+-            }) => {
+-                let dest_str = dest_url.to_string();
+-
+-                // pass the link the validator
+-                match validate_and_rewrite_link(current_file_path, &dest_str, valid_files) {
+-                    Ok(new_dest) => {
+-                        // take the link the validator gave back and push it in place of the old
+-                        rewrote_events.push(Event::Start(Tag::Link {
+-                            link_type,
+-                            dest_url: new_dest.into(),
+-                            title,
+-                            id,
+-                        }));
+-                    }
+-                    Err(e) => {
+-                        // woah, this internal link is invalid.
+-                        // we don't want to push this page.
+-                        // immediately abort the entire function and return the error.
+-                        return Err(anyhow!("In {}: {}", filename, e));
+-                    }
+-                }
+-            }
+-            // all other events pass through untouched
+-            _ => rewrote_events.push(event),
+-        }
+-    }
+-
+-    let mut html_content = String::new();
+-    html::push_html(&mut html_content, rewrote_events.into_iter());
+-
+-    Ok(html_content)
+-}
+-
+-pub fn parse_markdown_to_db_page(
+-    filename: &str,
+-    md_content: &str,
+-    os_modified: Option<NaiveDateTime>,
+-    os_created: Option<NaiveDateTime>,
+-    db_page_opt: Option<DbPage>,
+-    config: &ChasquiConfig,
+-    valid_files: &HashSet<String>,
+-) -> Result<(DbPage, DbOperationReport)> {
+-    // hash content and early exit if md content hash is the same
+-    let file_md_content_hash = format!("{:016x}", xxh3_64(md_content.as_bytes()));
+-    if let Some(db_page) = &db_page_opt {
+-        if db_page.md_content_hash == file_md_content_hash {
+-            return Ok((db_page.clone(), DbOperationReport::NoChange));
+-        }
+-    }
+-
+-    // extract frontmatter
+-    let (frontmatter, content_body) = extract_frontmatter(md_content, filename)?;
+-
+-    // resolve identifier
+-    let default_identifier = if config.strip_extensions {
+-        Path::new(filename)
+-            .with_extension("")
+-            .to_string_lossy()
+-            .to_string()
+-    } else {
+-        filename.to_string()
+-    };
+-    let identifier = frontmatter.identifier.unwrap_or(default_identifier);
+-
+-    // resolve dates with OS metadata
+-    let final_modified_datetime = resolve_datetime(frontmatter.modified_datetime, os_modified);
+-    let final_created_datetime = resolve_datetime(frontmatter.created_datetime, os_created);
+-
+-    // setup tags and names
+-    let name = frontmatter.name;
+-    let tags = frontmatter
+-        .tags
+-        .map(|t| serde_json::to_string(&t).unwrap_or_default());
+-
+-    // AST -> HTML
+-    let html_content =
+-        compile_markdown_to_html(Path::new(filename), filename, &content_body, valid_files)?;
+-
+-    // 7. Package for Database
+-    let operation = if db_page_opt.is_some() {
+-        DbOperationReport::Update
+-    } else {
+-        DbOperationReport::Insert
+-    };
+-
+-    let new_page = DbPage {
+-        identifier,
+-        filename: filename.to_string(),
+-        name,
+-        html_content,
+-        md_content: content_body,
+-        md_content_hash: file_md_content_hash,
+-        tags,
+-        modified_datetime: final_modified_datetime,
+-        created_datetime: final_created_datetime,
+-    };
+-
+-    Ok((new_page, operation))
+-}
+-
+-fn resolve_datetime(
+-    frontmatter_date: Option<String>,
+-    os_date: Option<NaiveDateTime>,
+-) -> Option<NaiveDateTime> {
+-    // tier 1: try to use frontmatter data
+-    if let Some(date_str) = frontmatter_date {
+-        // attempt to parse RFC3339
+-        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&date_str) {
+-            return Some(dt.naive_utc());
+-        }
+-
+-        // fallback to YYYY-MM-DD
+-        if let Ok(dt) = chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d") {
+-            return Some(dt.and_hms_opt(0, 0, 0).unwrap_or_default());
+-        }
+-    }
+-
+-    // tier 2 & 3
+-    os_date
+-}
+-
+-pub fn pages_to_hashmap(pages: Vec<&DbPage>) -> HashMap<&String, DbPage> {
+-    let mut h: HashMap<&String, DbPage> = HashMap::new();
+-    for page in pages {
+-        h.insert(&page.filename, page.clone());
+-    }
+-    h
+-}
+-
+-pub async fn process_page_operations(
+-    pool: &Pool<Sqlite>,
+-    page_operations: Vec<(DbPage, DbOperationReport)>,
+-) -> sqlx::Result<()> {
+-    for (db_page, operation) in page_operations {
+-        match operation {
+-            DbOperationReport::Insert => {
+-                sqlx::query!(
+-                    r#"
+-                    INSERT INTO pages (
+-                        identifier,
+-                        filename,
+-                        name,
+-                        html_content,
+-                        md_content,
+-                        md_content_hash,
+-                        tags,
+-                        modified_datetime,
+-                        created_datetime
+-                    )
+-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+-                    "#,
+-                    db_page.identifier,
+-                    db_page.filename,
+-                    db_page.name,
+-                    db_page.html_content,
+-                    db_page.md_content,
+-                    db_page.md_content_hash,
+-                    db_page.tags,
+-                    db_page.modified_datetime,
+-                    db_page.created_datetime
+-                )
+-                .execute(pool)
+-                .await?;
+-
+-                println!("Successfully inserted {} into db.", db_page.filename);
+-            }
+-            DbOperationReport::Update => {
+-                sqlx::query!(
+-                    r#"
+-                    UPDATE pages
+-                    SET
+-                        identifier = ?,
+-                        name = ?,
+-                        html_content = ?,
+-                        md_content = ?,
+-                        md_content_hash = ?,
+-                        tags = ?,
+-                        modified_datetime = ?,
+-                        created_datetime = ?
+-                    WHERE filename = ?
+-                    "#,
+-                    db_page.identifier,
+-                    db_page.name,
+-                    db_page.html_content,
+-                    db_page.md_content,
+-                    db_page.md_content_hash,
+-                    db_page.tags,
+-                    db_page.modified_datetime,
+-                    db_page.created_datetime,
+-                    db_page.filename
+-                )
+-                .execute(pool)
+-                .await?;
+-
+-                println!("Successfully updated {} in db.", db_page.filename);
+-            }
+-            DbOperationReport::Delete => {
+-                sqlx::query!(
+-                    r#"
+-                    DELETE FROM pages WHERE filename = ?
+-                    "#,
+-                    db_page.filename
+-                )
+-                .execute(pool)
+-                .await?;
+-
+-                println!("Successfully deleted {} from db.", db_page.filename);
+-            }
+-            DbOperationReport::NoChange => {
+-                // Do nothing
+-            }
+-        };
+-    }
+-    Ok(())
+-}
+-
+-fn validate_and_rewrite_link(
+-    current_file_path: &Path,
+-    dest: &str,
+-    valid_files: &HashSet<String>,
+-) -> Result<String> {
+-    // ignore external links and anchor links
+-    if dest.starts_with("http://")
+-        || dest.starts_with("https://")
+-        || dest.starts_with("mailto:")
+-        || dest.starts_with('#')
+-    {
+-        return Ok(dest.to_string());
+-    }
+-
+-    // strip any query parameters or fragments (e.g., index.md#section -> index.md)
+-    let path_part = dest.split('#').next().unwrap_or(dest);
+-    let path_part = path_part.split('?').next().unwrap_or(path_part);
+-
+-    // resolve the path mathematically in memory using 'lexical' joining
+-    let mut target_md_path = if path_part.starts_with('/') {
+-        PathBuf::from(path_part.trim_start_matches('/'))
+-    } else {
+-        let parent_dir = current_file_path.parent().unwrap_or_else(|| Path::new("")); // If no parent, it's at the root
+-        parent_dir.join(path_part)
+-    };
+-
+-    // handle extensions
+-    if target_md_path.extension().and_then(|e| e.to_str()) == Some("html")
+-        || target_md_path.extension().is_none()
+-    {
+-        target_md_path.set_extension("md");
+-    }
+-
+-    // clean the path to handle `../` mathematically (e.g., "folder/../index.md" -> "index.md")
+-    // we use a small helper here to parse the components without hitting the disk
+-    let normalized_path = normalize_path_lexically(&target_md_path);
+-    let normalized_string = normalized_path.to_string_lossy().replace("\\", "/");
+-
+-    if !valid_files.contains(&normalized_string) {
+-        return Err(anyhow!(
+-            "Broken internal link: '{}' resolves to '{}', which does not exist.",
+-            dest,
+-            normalized_string
+-        ));
+-    }
+-
+-    // convert the file path to a root-relative web URL
+-    let web_url = normalized_path
+-        .with_extension("")
+-        .to_string_lossy()
+-        .to_string()
+-        .replace("\\", "/");
+-
+-    // astro explicitly treats undefined as our root "/".
+-    if web_url == "index" {
+-        Ok("/".to_string())
+-    } else {
+-        Ok(format!("/{}", web_url))
+-    }
+-}
+-
+-// helper to mathematically resolve `.` and `..` without touching the filesystem
+-fn normalize_path_lexically(path: &Path) -> PathBuf {
+-    let mut components = Vec::new();
+-    for component in path.components() {
+-        match component {
+-            std::path::Component::CurDir => {}
+-            std::path::Component::ParentDir => {
+-                components.pop();
+-            }
+-            std::path::Component::Normal(c) => components.push(c),
+-            _ => components.push(component.as_os_str()),
+-        }
+-    }
+-    components.into_iter().collect()
+-}
+-
+-enum MetadataDateTimeOptions {
+-    Modified,
+-    Created,
+-}
+-
+-fn get_property_from_metadata(
+-    metadata_result: &std::io::Result<fs::Metadata>,
+-    options: &MetadataDateTimeOptions,
+-) -> Result<NaiveDateTime> {
+-    // depending on user's provided options, attempt to get modified/created data from metadata
+-    let metadata = metadata_result
+-        .as_ref()
+-        .map_err(|e| anyhow!("Metadata error: {}", e))?;
+-
+-    let systime = match options {
+-        MetadataDateTimeOptions::Modified => metadata.modified(),
+-        MetadataDateTimeOptions::Created => metadata.created(),
+-    };
+-
+-    let cleaned_systime = match systime {
+-        Ok(val) => val,
+-        Err(e) => return Err(anyhow!("Failed to get time from metadata: {}", e)),
+-    };
+-
+-    let dt = match system_time_to_chrono(&cleaned_systime) {
+-        Ok(val) => val,
+-        Err(e) => return Err(e),
+-    };
+-
+-    return Ok(dt);
+-}
+-
+-fn system_time_to_chrono(sys_time: &std::time::SystemTime) -> Result<NaiveDateTime> {
+-    let time: u64 = sys_time
+-        .duration_since(std::time::UNIX_EPOCH)
+-        .map_err(|_| anyhow!("Failed to convert system time to chrono"))?
+-        .as_secs();
+-
+-    let dt = chrono::DateTime::from_timestamp(time as i64, 0)
+-        .ok_or_else(|| anyhow!("Invalid OS timestamp"))?;
+-
+-    Ok(dt.naive_utc())
+-}
++// This file is currently empty as all previous functionality has been 
++// moved to the SyncService. It is kept as a placeholder for 
++// any future repository-specific logic for the pages feature.
+diff --git a/src/features/watcher.rs b/src/features/watcher.rs
+index fd51a03..51a3bbf 100644
+--- a/src/features/watcher.rs
++++ b/src/features/watcher.rs
+@@ -1,28 +1,26 @@
+ use crate::config::ChasquiConfig;
+-use crate::features::pages::model::DbOperationReport;
+-use crate::features::pages::model::DbPage;
+-use crate::features::pages::repo::{
+-    build_valid_files_set, get_entry_by_filename, get_pages_from_db, process_md_dir,
+-    process_page_operations, process_single_file,
+-};
++use crate::database::sqlite::SqliteRepository;
++use crate::services::sync::SyncService;
+ use notify::{EventKind, RecursiveMode, Watcher};
+ use reqwest::Client;
+-use sqlx::{Pool, Sqlite};
+-use std::path::{Path, PathBuf};
++use std::path::PathBuf;
+ use std::sync::Arc;
+ use std::sync::atomic::{AtomicBool, Ordering};
+ use std::time::Duration;
+ use tokio::sync::mpsc;
++use walkdir;
+ 
+ // what operations does our async worker know?
+ enum SyncCommand {
+     SingleFile(PathBuf),
+     DeleteFile(PathBuf),
+-    FullSync,
+ }
+ 
+ /// Spawns a background task that watches for file changes and syncs the database.
+-pub fn start_directory_watcher(pool: Pool<Sqlite>, config: Arc<ChasquiConfig>) {
++pub fn start_directory_watcher(
++    sync_service: Arc<SyncService<SqliteRepository>>,
++    config: Arc<ChasquiConfig>,
++) {
+     // the conveyor belt
+     let (tx, mut rx) = mpsc::channel::<SyncCommand>(100);
+ 
+@@ -71,6 +69,8 @@ pub fn start_directory_watcher(pool: Pool<Sqlite>, config: Arc<ChasquiConfig>) {
+         .expect("Failed to watch content directory");
+ 
+     // generate a worker to process reciever
++    let worker_sync_service = sync_service.clone(); // Clone for the spawned task
++    let worker_config = config.clone(); // Clone for the spawned task
+     tokio::spawn(async move {
+         let _kept_alive_watcher = watcher;
+         let http_client = Client::new();
+@@ -85,18 +85,19 @@ pub fn start_directory_watcher(pool: Pool<Sqlite>, config: Arc<ChasquiConfig>) {
+             if needs_full_sync.swap(false, Ordering::SeqCst) {
+                 println!("Executing Fallback Full Directory Sync...");
+ 
+-                // process file logic
+-                if let Ok(db_pages) = get_pages_from_db(&pool).await {
+-                    let borrowable_db_pages: Vec<&DbPage> = db_pages.iter().collect();
+-
+-                    if let Ok(page_operations) =
+-                        process_md_dir(&config.content_dir, borrowable_db_pages, &config)
++                // iterate through content directory and process all files
++                for entry in walkdir::WalkDir::new(&worker_config.content_dir)
++                    .into_iter()
++                    .filter_map(|e| e.ok())
++                {
++                    if entry.file_type().is_file()
++                        && entry.path().extension().and_then(|s| s.to_str()) == Some("md")
+                     {
+-                        if process_page_operations(&pool, page_operations)
+-                            .await
+-                            .is_ok()
+-                        {
+-                            sync_occurred = true;
++                        let path = entry.into_path();
++                        if let Err(e) = worker_sync_service.handle_file_changed(&path).await {
++                            eprintln!("Error during full sync of {}: {}", path.display(), e);
++                        } else {
++                            sync_occurred = true; // Mark sync as occurred if at least one file is processed successfully
+                         }
+                     }
+                 }
+@@ -108,42 +109,26 @@ pub fn start_directory_watcher(pool: Pool<Sqlite>, config: Arc<ChasquiConfig>) {
+                     // handle updates
+                     SyncCommand::SingleFile(path) => {
+                         println!("Processing single file change: {:?}", path);
+-                        let relative_path = path.strip_prefix(&config.content_dir).unwrap_or(&path);
+-                        let filename = relative_path.to_string_lossy().to_string();
+-
+-                        if let Ok(db_page_opt) = get_entry_by_filename(&filename, &pool).await {
+-                            let valid_files = build_valid_files_set(&config.content_dir);
+-                            if let Ok(operation_report) =
+-                                process_single_file(&path, db_page_opt, &config, &valid_files)
+-                            {
+-                                let ops = vec![operation_report];
+-                                if process_page_operations(&pool, ops).await.is_ok() {
+-                                    sync_occurred = true;
+-                                }
+-                            }
++                        if let Err(e) = worker_sync_service.handle_file_changed(&path).await {
++                            eprintln!("Error processing file change {}: {}", path.display(), e);
++                        } else {
++                            sync_occurred = true;
+                         }
+                     }
+                     // handle deletions
+                     SyncCommand::DeleteFile(path) => {
+                         println!("Processing single file deletion: {:?}", path);
+-                        let relative_path = path.strip_prefix(&config.content_dir).unwrap_or(&path);
+-                        let filename = relative_path.to_string_lossy().to_string();
+-
+-                        // query to see if this file even existed in the DB
+-                        if let Ok(Some(db_page)) = get_entry_by_filename(&filename, &pool).await {
+-                            // package it for deletion
+-                            let ops = vec![(db_page, DbOperationReport::Delete)];
+-                            if process_page_operations(&pool, ops).await.is_ok() {
+-                                sync_occurred = true;
+-                            }
++                        if let Err(e) = worker_sync_service.handle_file_deleted(&path).await {
++                            eprintln!("Error processing file deletion {}: {}", path.display(), e);
++                        } else {
++                            sync_occurred = true;
+                         }
+                     }
+-                    SyncCommand::FullSync => {}
+                 }
+             }
+ 
+             if sync_occurred {
+-                trigger_frontend_build(&http_client, &config.webhook_url, &config.webhook_secret)
++                trigger_frontend_build(&http_client, &worker_config.webhook_url, &worker_config.webhook_secret)
+                     .await;
+             }
+ 
+diff --git a/src/io/scanner.rs b/src/io/scanner.rs
+new file mode 100644
+index 0000000..e69de29
+diff --git a/src/main.rs b/src/main.rs
+index bb393ff..9903865 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1,22 +1,26 @@
+ use crate::config::ChasquiConfig;
+-use crate::features::pages::model::DbPage;
+-use crate::features::pages::repo::{get_pages_from_db, process_md_dir, process_page_operations};
++use crate::database::sqlite::SqliteRepository;
+ use crate::features::watcher::start_directory_watcher;
++use crate::services::sync::SyncService;
+ use axum::Router;
+ use dotenv;
+ use sqlx::Sqlite;
+ use sqlx::migrate::MigrateDatabase;
+ use sqlx::sqlite::SqlitePoolOptions;
+-use std::path::Path;
+ use std::sync::Arc;
+ use tower_http::services::ServeDir;
++use walkdir;
+ 
+ pub mod config;
++pub mod database;
++pub mod domain;
+ mod features;
++pub mod services;
++pub mod parser;
+ 
+ #[derive(Clone)]
+ pub struct AppState {
+-    pub pool: sqlx::Pool<Sqlite>,
++    pub sync_service: Arc<SyncService<SqliteRepository>>,
+     pub config: Arc<ChasquiConfig>,
+ }
+ 
+@@ -47,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
+         };
+     }
+ 
+-    // connect to our db
++    // connect to db
+     let pool = match SqlitePoolOptions::new()
+         .max_connections(config.max_connections)
+         .connect(&config.database_url)
+@@ -59,30 +63,44 @@ async fn main() -> anyhow::Result<()> {
+         }
+     };
+ 
+-    // run migrations
+-    sqlx::migrate!()
+-        .run(&pool)
++    // initialize database access via desired database implementation
++    let repository = SqliteRepository::new(pool.clone());
++
++    // sync_service holds an in-memory hashmap of our database.
++    // reading from this (rather, asking it for stuff) is much quicker than reading from sqlx.
++    let sync_service = SyncService::new(repository)
+         .await
+-        .expect("Failed to run database migrations.");
++        .expect("Failed to initialize SyncService");
++    let shared_sync_service = Arc::new(sync_service);
+ 
+     let app_state = AppState {
+-        pool: pool.clone(),
++        sync_service: shared_sync_service.clone(),
+         config: shared_config.clone(),
+     };
+ 
+-    // init pages, sync with db
+-    let md_path = Path::new("./content/md");
+-    let db_pages = get_pages_from_db(&pool).await.unwrap();
+-    let borrowable_db_pages: Vec<&DbPage> = db_pages.iter().collect();
+-    let page_operations = process_md_dir(md_path, borrowable_db_pages, &config).unwrap();
+-    process_page_operations(&pool, page_operations)
++    // run migrations
++    sqlx::migrate!()
++        .run(&pool)
+         .await
+-        .unwrap();
++        .expect("Failed to run database migrations.");
+ 
+-    println!("Sync complete.");
++    // Initial sync of content directory
++    println!("Starting initial content sync...");
++    let content_dir = &shared_config.content_dir;
++    for entry in walkdir::WalkDir::new(content_dir).into_iter().filter_map(|e| e.ok()) {
++        if entry.file_type().is_file()
++            && entry.path().extension().and_then(|s| s.to_str()) == Some("md")
++        {
++            let path = entry.into_path();
++            if let Err(e) = shared_sync_service.handle_file_changed(&path).await {
++                eprintln!("Error during initial sync of {}: {}", path.display(), e);
++            }
++        }
++    }
++    println!("Initial content sync complete.");
+ 
+     // start background file watcher
+-    start_directory_watcher(pool.clone(), shared_config.clone());
++    start_directory_watcher(shared_sync_service.clone(), shared_config.clone());
+ 
+     println!("Starting server...");
+ 
+diff --git a/src/parser/markdown.rs b/src/parser/markdown.rs
+new file mode 100644
+index 0000000..75d85d6
+--- /dev/null
++++ b/src/parser/markdown.rs
+@@ -0,0 +1,41 @@
++use crate::parser::model::PageFrontMatter;
++use anyhow::{anyhow, Result};
++use gray_matter::{engine::YAML, Matter};
++use pulldown_cmark::{html, Event, Options as CmarkOptions, Parser, Tag};
++
++// extracts YAML frontmatter and returns the typed metadata alongside the raw markdown body
++pub fn extract_frontmatter(md_content: &str, filename: &str) -> Result<(PageFrontMatter, String)> {
++    let matter = Matter::<YAML>::new();
++
++    // explicitly tell 'parse' with epic turbofish syntax to use our PageFrontMatter struct for <D>
++    let parsed_matter = matter
++        .parse::<PageFrontMatter>(md_content)
++        .map_err(|e| anyhow!("Failed to parse frontmatter in {}: {}", filename, e))?;
++
++    let frontmatter = parsed_matter.data.unwrap_or_default();
++
++    Ok((frontmatter, parsed_matter.content))
++}
++
++// compiles markdown content into HTML, and returns a list of all found links
++pub fn compile_markdown_to_html(markdown_content: &str) -> Result<(String, Vec<String>)> {
++    let mut options = CmarkOptions::empty();
++    options.insert(CmarkOptions::ENABLE_STRIKETHROUGH);
++    options.insert(CmarkOptions::ENABLE_TABLES);
++
++    let parser = Parser::new_ext(markdown_content, options);
++
++    let mut html_content = String::new();
++    let mut extracted_links = Vec::new();
++
++    let event_iterator = parser.map(|event| {
++        if let Event::Start(Tag::Link { dest_url, .. }) = &event {
++            extracted_links.push(dest_url.to_string());
++        }
++        event
++    });
++
++    html::push_html(&mut html_content, event_iterator);
++
++    Ok((html_content, extracted_links))
++}
+diff --git a/src/services/mod.rs b/src/services/mod.rs
+new file mode 100644
+index 0000000..d086d5b
+--- /dev/null
++++ b/src/services/mod.rs
+@@ -0,0 +1 @@
++pub mod sync;
+diff --git a/src/services/sync.rs b/src/services/sync.rs
+new file mode 100644
+index 0000000..7bd69b7
+--- /dev/null
++++ b/src/services/sync.rs
+@@ -0,0 +1,185 @@
++use crate::database::PageRepository;
++use crate::domain::Page;
++use crate::parser::markdown::{compile_markdown_to_html, extract_frontmatter};
++use anyhow::{Context, Result};
++use chrono::{NaiveDateTime, Utc};
++use std::collections::HashMap;
++use std::fs;
++use std::path::Path;
++use tokio::sync::RwLock;
++
++pub struct SyncService<R: PageRepository> {
++    repo: R,
++    // our in-memory cache
++    // Key: filename (e.g., "post1.md")
++    // Value: Page entity
++    page_cache: RwLock<HashMap<String, Page>>,
++}
++
++impl<R: PageRepository> SyncService<R> {
++    // async because upon creation populates internal pages cache
++    pub async fn new(repo: R) -> Result<Self> {
++        println!("Orchestrator: Booting up and building internal cache...");
++
++        // get all pages
++        let all_pages = repo
++            .get_all_pages()
++            .await
++            .context("Failed to load pages for cache initialization")?;
++
++        // index by filename
++        let mut cache = HashMap::new();
++        for page in all_pages {
++            cache.insert(page.filename.clone(), page);
++        }
++
++        println!("Orchestrator: Cache built with {} pages.", cache.len());
++
++        Ok(Self {
++            repo,
++            // wrap the HashMap in the async Read-Write Lock
++            page_cache: RwLock::new(cache),
++        })
++    }
++
++    pub async fn get_all_pages(&self) -> Vec<Page> {
++        let cache_guard = self.page_cache.read().await;
++        cache_guard.values().cloned().collect()
++    }
++
++    pub async fn get_page_by_identifier(&self, identifier: &str) -> Option<Page> {
++        let cache_guard = self.page_cache.read().await;
++        cache_guard
++            .values()
++            .find(|page| page.identifier == identifier)
++            .cloned()
++    }
++
++    // helper function to validate links against cache
++    pub async fn validate_links(&self, extracted_links: &[String]) -> Result<()> {
++        let cache_guard = self.page_cache.read().await;
++
++        for link in extracted_links {
++            // TODO: redo path normalization
++            let normalized_link = link.clone();
++
++            if !cache_guard.contains_key(&normalized_link) {
++                return Err(anyhow::anyhow!(
++                    "Broken internal link detected: '{}' does not exist in the system.",
++                    normalized_link
++                ));
++            }
++        }
++
++        Ok(())
++    }
++
++    // a file has changed and we must submit the changed file to db
++    pub async fn handle_file_changed(&self, path: &Path) -> Result<()> {
++        let filename = path
++            .file_name()
++            .and_then(|s| s.to_str())
++            .context("Invalid file path")?
++            .to_string();
++
++        let raw_markdown = fs::read_to_string(path)
++            .with_context(|| format!("Failed to read markdown file: {}", path.display()))?;
++
++        // get os metadata for fallback dates
++        let metadata = fs::metadata(path)?;
++        let os_modified = metadata
++            .modified()
++            .ok()
++            .map(|t| chrono::DateTime::<Utc>::from(t).naive_utc());
++        let os_created = metadata
++            .created()
++            .ok()
++            .map(|t| chrono::DateTime::<Utc>::from(t).naive_utc());
++
++        // extract the frontmatter
++        let (frontmatter, content_body) = extract_frontmatter(&raw_markdown, &filename)?;
++
++        // compile the markdown and get ulist of links
++        let (html_content, extracted_links) = compile_markdown_to_html(&content_body)?;
++
++        // validate links from our markdown validation, discard operation if any user supplied
++        // links are invalid
++        self.validate_links(&extracted_links).await?;
++
++        // hash md content
++        let md_content_hash = format!(
++            "{:016x}",
++            xxhash_rust::xxh3::xxh3_64(raw_markdown.as_bytes())
++        );
++
++        // resolve identifier, fallback to filename if not in frontmatter
++        let identifier = frontmatter
++            .identifier
++            .unwrap_or_else(|| filename.to_string());
++
++        // resolve dates and fallback to OS metadata if not in frontmatter
++        let modified_datetime = resolve_datetime(frontmatter.modified_datetime, os_modified);
++        let created_datetime = resolve_datetime(frontmatter.created_datetime, os_created);
++
++        let page = Page {
++            identifier,
++            filename: filename.to_string(),
++            name: frontmatter.name,
++            html_content,
++            md_content: content_body,
++            md_content_hash,
++            tags: frontmatter.tags.unwrap_or_default(),
++            modified_datetime,
++            created_datetime,
++        };
++
++        // save the pure page in our in-memory repo
++        self.repo.save_page(&page).await?;
++
++        // update page_cache for fast lookups
++        let mut cache_guard = self.page_cache.write().await;
++        cache_guard.insert(page.filename.clone(), page);
++
++        println!("Successfully processed and saved {}", filename);
++
++        Ok(())
++    }
++
++    pub async fn handle_file_deleted(&self, path: &Path) -> Result<()> {
++        let filename = path
++            .file_name()
++            .and_then(|s| s.to_str())
++            .context("Invalid file path")?
++            .to_string();
++
++        self.repo.delete_page(&filename).await?;
++
++        let mut cache_guard = self.page_cache.write().await;
++        cache_guard.remove(&filename);
++
++        println!("Successfully deleted {}", filename);
++
++        Ok(())
++    }
++}
++
++fn resolve_datetime(
++    frontmatter_date: Option<String>,
++    os_date: Option<NaiveDateTime>,
++) -> Option<NaiveDateTime> {
++    // tier 1: try to use frontmatter data
++    if let Some(date_str) = frontmatter_date {
++        // attempt to parse RFC3339
++        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&date_str) {
++            return Some(dt.naive_utc());
++        }
++
++        // fallback to YYYY-MM-DD
++        if let Ok(dt) = chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d") {
++            return Some(dt.and_hms_opt(0, 0, 0).unwrap_or_default());
++        }
++    }
++
++    // tier 2 & 3
++    os_date
++}
