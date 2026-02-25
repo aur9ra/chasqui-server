@@ -1,7 +1,7 @@
 use crate::parser::model::PageFrontMatter;
-use anyhow::{anyhow, Result};
-use gray_matter::{engine::YAML, Matter};
-use pulldown_cmark::{html, Event, Options as CmarkOptions, Parser, Tag};
+use anyhow::{Result, anyhow};
+use gray_matter::{Matter, engine::YAML};
+use pulldown_cmark::{Event, Options as CmarkOptions, Parser, Tag, html};
 
 // extracts YAML frontmatter and returns the typed metadata alongside the raw markdown body
 pub fn extract_frontmatter(md_content: &str, filename: &str) -> Result<(PageFrontMatter, String)> {
@@ -17,8 +17,11 @@ pub fn extract_frontmatter(md_content: &str, filename: &str) -> Result<(PageFron
     Ok((frontmatter, parsed_matter.content))
 }
 
-// compiles markdown content into HTML, and returns a list of all found links
-pub fn compile_markdown_to_html(markdown_content: &str) -> Result<(String, Vec<String>)> {
+// compiles markdown content into HTML, and resolves links on-the-fly using the provided resolver
+pub fn compile_markdown_to_html<F>(markdown_content: &str, mut resolver: F) -> Result<String>
+where
+    F: FnMut(&str) -> Option<String>,
+{
     let mut options = CmarkOptions::empty();
     options.insert(CmarkOptions::ENABLE_STRIKETHROUGH);
     options.insert(CmarkOptions::ENABLE_TABLES);
@@ -26,16 +29,47 @@ pub fn compile_markdown_to_html(markdown_content: &str) -> Result<(String, Vec<S
     let parser = Parser::new_ext(markdown_content, options);
 
     let mut html_content = String::new();
-    let mut extracted_links = Vec::new();
+    let mut broken_links = Vec::new();
 
+    // parse AST -> for link
     let event_iterator = parser.map(|event| {
-        if let Event::Start(Tag::Link { dest_url, .. }) = &event {
-            extracted_links.push(dest_url.to_string());
+        if let Event::Start(Tag::Link {
+            link_type,
+            dest_url,
+            title,
+            id,
+        }) = event
+        {
+            match resolver(&dest_url) {
+                Some(new_url) => Event::Start(Tag::Link {
+                    link_type,
+                    dest_url: new_url.into(),
+                    title,
+                    id,
+                }),
+                None => {
+                    broken_links.push(dest_url.to_string());
+                    Event::Start(Tag::Link {
+                        link_type,
+                        dest_url,
+                        title,
+                        id,
+                    })
+                }
+            }
+        } else {
+            event
         }
-        event
     });
 
     html::push_html(&mut html_content, event_iterator);
 
-    Ok((html_content, extracted_links))
+    if !broken_links.is_empty() {
+        return Err(anyhow!(
+            "Broken internal links detected: {}",
+            broken_links.join(", ")
+        ));
+    }
+
+    Ok(html_content)
 }

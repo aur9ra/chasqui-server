@@ -8,7 +8,6 @@ use axum::{
     http::StatusCode,
     routing::get,
 };
-use model::{DbPage, JsonPage};
 
 pub fn pages_router() -> Router<AppState> {
     Router::new()
