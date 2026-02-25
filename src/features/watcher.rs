@@ -10,6 +10,8 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use walkdir;
 
+const DEBOUNCE_MS: u64 = 1500;
+
 // what operations does our async worker know?
 enum SyncCommand {
     SingleFile(PathBuf),
@@ -104,9 +106,10 @@ pub fn start_directory_watcher(
                 }
             }
 
-            // 2. Collection Mode: Continue picking up messages until we see 500ms of silence
+            // 2. Collection Mode: Continue picking up messages until we see silence
             loop {
-                let timeout = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
+                let timeout =
+                    tokio::time::timeout(Duration::from_millis(DEBOUNCE_MS), rx.recv()).await;
 
                 match timeout {
                     Ok(Some(cmd)) => {
