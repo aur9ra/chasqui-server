@@ -3,6 +3,7 @@ use crate::database::PageRepository;
 use crate::domain::Page;
 use crate::io::ContentReader;
 use crate::parser::markdown::{compile_markdown_to_html, extract_frontmatter};
+use crate::services::ContentBuildNotifier;
 use anyhow::{Context, Result};
 use chrono::NaiveDateTime;
 use std::collections::HashMap;
@@ -10,6 +11,8 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+// the manifest represents our in-memory knowledge of the database
+// during edit events, this will be edited before the SyncCache (for routes) and db.
 struct Manifest {
     filename_to_identifier: HashMap<String, String>,
     identifier_to_filename: HashMap<String, String>,
@@ -39,59 +42,46 @@ impl Manifest {
     // this function will give the AST parser links that will navigate to the identifier and catch
     // errors
     // this function will also ignore any external links or mailtos
-        fn resolve_link(&self, link: &str, config: &ChasquiConfig) -> String {
-            // filter external and anchor-only links
-            if link.starts_with("http://")
-                || link.starts_with("https://")
-                || link.starts_with("mailto:")
-                || link.starts_with('#')
-            {
-                return link.to_string();
-            }
-    
-            // normalize by stripping fragments
-            let parts: Vec<&str> = link.split('#').collect();
-            let lookup_key = parts[0];
-            let fragment = parts.get(1).map(|f| format!("#{}", f)).unwrap_or_default();
-    
-            println!("LinkResolver: Debugging link '{}'", link);
-            println!("LinkResolver:   Lookup Key: '{}'", lookup_key);
-    
-            // attempt to lookup the link by filename & identifier
-            let resolved_identifier =
-                if let Some(identifier) = self.filename_to_identifier.get(lookup_key) {
-                    println!(
-                        "LinkResolver:   Matched by filename! Resolved to identifier: '{}'",
-                        identifier
-                    );
-                    Some(identifier.clone())
-                } else if self.identifier_to_filename.contains_key(lookup_key) {
-                    println!("LinkResolver:   Matched by identifier!");
-                    Some(lookup_key.to_string())
+    fn resolve_link(&self, link: &str, config: &ChasquiConfig) -> String {
+        // filter external and anchor-only links
+        if link.starts_with("http://")
+            || link.starts_with("https://")
+            || link.starts_with("mailto:")
+            || link.starts_with('#')
+        {
+            return link.to_string();
+        }
+
+        // normalize by stripping fragments
+                    let parts: Vec<&str> = link.split('#').collect();
+                    let lookup_key = parts[0];
+                    let fragment = parts.get(1).map(|f| format!("#{}", f)).unwrap_or_default();
+            
+                    // attempt to lookup the link by filename & identifier
+                    let resolved_identifier =
+                        if let Some(identifier) = self.filename_to_identifier.get(lookup_key) {
+                            Some(identifier.clone())
+                        } else if self.identifier_to_filename.contains_key(lookup_key) {
+                            Some(lookup_key.to_string())
+                        } else {
+                            None
+                        };
+                // return the "fixed" link that will navigate to the page the writer intended, or the
+        // original if broken
+        match resolved_identifier {
+            Some(id) => {
+                if config.serve_home && id == config.home_identifier {
+                    format!("/{}", fragment)
                 } else {
-                    println!(
-                        "LinkResolver:   WARNING - FAILED to match '{}'. Link will remain as-is.",
-                        lookup_key
-                    );
-                    None
-                };
-    
-            // return the "fixed" link that will navigate to the page the writer intended, or the
-            // original if broken
-            match resolved_identifier {
-                Some(id) => {
-                    if config.serve_home && id == config.home_identifier {
-                        format!("/{}", fragment)
-                    } else {
-                        format!("/{}{}", id, fragment)
-                    }
+                    format!("/{}{}", id, fragment)
                 }
-                None => link.to_string(),
             }
+            None => link.to_string(),
         }
     }
-    
+}
 
+// exists to quickly get a page back for our routes rather than calling the db
 struct SyncCache {
     pages_by_filename: HashMap<String, Page>,
 }
@@ -99,6 +89,7 @@ struct SyncCache {
 pub struct SyncService {
     repo: Box<dyn PageRepository>,
     reader: Box<dyn ContentReader>,
+    notifier: Box<dyn ContentBuildNotifier>,
     config: Arc<ChasquiConfig>,
     // The "Map of the World" - updated during the Discovery Pass
     manifest: RwLock<Manifest>,
@@ -111,6 +102,7 @@ impl SyncService {
     pub async fn new(
         repo: Box<dyn PageRepository>,
         reader: Box<dyn ContentReader>,
+        notifier: Box<dyn ContentBuildNotifier>,
         config: Arc<ChasquiConfig>,
     ) -> Result<Self> {
         println!("Orchestrator: Booting up and building internal cache...");
@@ -137,10 +129,15 @@ impl SyncService {
         Ok(Self {
             repo,
             reader,
+            notifier,
             config,
             manifest: RwLock::new(manifest),
             cache: RwLock::new(SyncCache { pages_by_filename }),
         })
+    }
+
+    pub async fn notify_build(&self) -> Result<()> {
+        self.notifier.notify().await
     }
 
     /// Stage 1: Discovery Pass - Register a file's identity to the global map
@@ -300,9 +297,6 @@ impl SyncService {
         // resolve dates and fallback to OS metadata if not in frontmatter
         let modified_datetime = resolve_datetime(frontmatter.modified_datetime, os_modified);
         let created_datetime = resolve_datetime(frontmatter.created_datetime, os_created);
-
-        println!("Successfully processed and saved {}", filename);
-        println!("Generated HTML for {}:\n{}", identifier, html_content);
 
         let page = Page {
             identifier,

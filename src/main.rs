@@ -1,7 +1,7 @@
 use crate::config::ChasquiConfig;
 use crate::database::sqlite::SqliteRepository;
-use crate::features::watcher::start_directory_watcher;
 use crate::services::sync::SyncService;
+use crate::watcher::watcher::start_directory_watcher;
 use axum::Router;
 use dotenv;
 use sqlx::Sqlite;
@@ -17,6 +17,10 @@ mod features;
 pub mod io;
 pub mod parser;
 pub mod services;
+pub mod watcher;
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -69,11 +73,22 @@ async fn main() -> anyhow::Result<()> {
     // initialize content reader
     let reader = io::local::LocalContentReader;
 
+    // initialize notifier
+    let notifier = services::WebhookBuildNotifier::new(
+        config.webhook_url.clone(),
+        config.webhook_secret.clone(),
+    );
+
     // sync_service holds an in-memory hashmap of our database.
     // reading from this (rather, asking it for stuff) is much quicker than reading from sqlx.
-    let sync_service = SyncService::new(Box::new(repository), Box::new(reader), shared_config.clone())
-        .await
-        .expect("Failed to initialize SyncService");
+    let sync_service = SyncService::new(
+        Box::new(repository),
+        Box::new(reader),
+        Box::new(notifier),
+        shared_config.clone(),
+    )
+    .await
+    .expect("Failed to initialize SyncService");
     let shared_sync_service = Arc::new(sync_service);
 
     let app_state = AppState {
