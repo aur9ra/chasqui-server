@@ -31,7 +31,7 @@ async fn setup_api_test_state() -> AppState {
     });
 
     // put a "seed" page into our fake file system
-    reader.add_file("/content/api-test.md", "# API Test Content");
+    reader.add_file("/content/api-test.md", "---\ntags:\n  - api\n  - test\n---\n# API Test Content");
     
     let service = SyncService::new(
         Box::new(repo), 
@@ -76,6 +76,13 @@ async fn test_get_page_success() {
     
     assert_eq!(json["identifier"], "api-test");
     assert!(json["html_content"].as_str().unwrap().contains("<h1>API Test Content</h1>"));
+
+    // verify that tags are a native JSON array, NOT a string
+    assert!(json["tags"].is_array());
+    let tags = json["tags"].as_array().unwrap();
+    assert_eq!(tags.len(), 2);
+    assert_eq!(tags[0], "api");
+    assert_eq!(tags[1], "test");
 }
 
 // ensure the API correctly returns 404 for pages that don't exist
