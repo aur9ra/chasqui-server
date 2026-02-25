@@ -26,9 +26,10 @@ impl ChasquiConfig {
                 .expect("Failed to determine FRONTEND_DIST_PATH from environment variables"),
         );
 
-        let content_dir = PathBuf::from(
+        let content_dir = std::fs::canonicalize(
             std::env::var("CONTENT_DIR").unwrap_or_else(|_| "./content/md".to_string()),
-        );
+        )
+        .expect("Failed to resolve CONTENT_DIR to an absolute path. Does the directory exist?");
 
         let strip_extensions = std::env::var("DEFAULT_IDENTIFIER_STRIP_EXTENSION")
             .unwrap_or_else(|_| "false".to_string())

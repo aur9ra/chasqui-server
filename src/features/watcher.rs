@@ -32,32 +32,39 @@ pub fn start_directory_watcher(
     // create os watcher
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if let Ok(event) = res {
-            // determine if this event is something we care about
-            let command = match event.kind {
-                // catch creations and modifications
-                EventKind::Create(_) | EventKind::Modify(_) => event
-                    .paths
-                    .first()
-                    .map(|p| SyncCommand::SingleFile(p.clone())),
-                // catch deletions
-                EventKind::Remove(_) => event
-                    .paths
-                    .first()
-                    .map(|p| SyncCommand::DeleteFile(p.clone())),
-                _ => None,
-            };
+            // only care about the first path for these simple events
+            if let Some(path) = event.paths.first() {
+                // Filter: Only care about .md files and ignore editor swap/temp files
+                let ext = path.extension().and_then(|s| s.to_str());
+                let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
 
-            // If it's a command we care about, try to send it
-            if let Some(cmd) = command {
-                match tx.try_send(cmd) {
-                    Ok(_) => {}
-                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                        needs_full_sync_clone.store(true, Ordering::SeqCst);
-                        println!(
+                if ext != Some("md") || filename.starts_with('.') || filename.ends_with('~') {
+                    return;
+                }
+
+                // determine if this event is something we care about
+                let command = match event.kind {
+                    // catch creations and modifications
+                    EventKind::Create(_) | EventKind::Modify(_) => {
+                        Some(SyncCommand::SingleFile(path.clone()))
+                    }
+                    // catch deletions
+                    EventKind::Remove(_) => Some(SyncCommand::DeleteFile(path.clone())),
+                    _ => None,
+                };
+
+                // If it's a command we care about, try to send it
+                if let Some(cmd) = command {
+                    match tx.try_send(cmd) {
+                        Ok(_) => {}
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                            needs_full_sync_clone.store(true, Ordering::SeqCst);
+                            println!(
                             "Warning: File event dropped due to high traffic. Triggering Full Sync."
                         );
+                        }
+                        Err(_) => {}
                     }
-                    Err(_) => {}
                 }
             }
         }
