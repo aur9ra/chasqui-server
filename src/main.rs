@@ -9,18 +9,18 @@ use sqlx::migrate::MigrateDatabase;
 use sqlx::sqlite::SqlitePoolOptions;
 use std::sync::Arc;
 use tower_http::services::ServeDir;
-use walkdir;
 
 pub mod config;
 pub mod database;
 pub mod domain;
 mod features;
+pub mod io;
 pub mod parser;
 pub mod services;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub sync_service: Arc<SyncService<SqliteRepository>>,
+    pub sync_service: Arc<SyncService>,
     pub config: Arc<ChasquiConfig>,
 }
 
@@ -66,9 +66,12 @@ async fn main() -> anyhow::Result<()> {
     // initialize database access via desired database implementation
     let repository = SqliteRepository::new(pool.clone());
 
+    // initialize content reader
+    let reader = io::local::LocalContentReader;
+
     // sync_service holds an in-memory hashmap of our database.
     // reading from this (rather, asking it for stuff) is much quicker than reading from sqlx.
-    let sync_service = SyncService::new(repository, shared_config.clone())
+    let sync_service = SyncService::new(Box::new(repository), Box::new(reader), shared_config.clone())
         .await
         .expect("Failed to initialize SyncService");
     let shared_sync_service = Arc::new(sync_service);
@@ -85,34 +88,9 @@ async fn main() -> anyhow::Result<()> {
         .expect("Failed to run database migrations.");
 
     // initial sync of content directory for pages
-    println!("Starting initial content sync...");
-    let content_dir = &shared_config.content_dir;
-
-    // Pass 1: Discovery - Build the "Map of the World" (Manifest)
-    println!("Discovery Pass: Mapping identifiers...");
-    let entries: Vec<_> = walkdir::WalkDir::new(content_dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_type().is_file() && e.path().extension().and_then(|s| s.to_str()) == Some("md")
-        })
-        .collect();
-
-    for entry in &entries {
-        if let Err(e) = shared_sync_service.register_file_to_manifest(entry.path()).await {
-            eprintln!("Error during discovery of {}: {}", entry.path().display(), e);
-        }
+    if let Err(e) = shared_sync_service.full_sync().await {
+        eprintln!("Error during initial sync: {}", e);
     }
-
-    // Pass 2: Ingestion - Compile and Save
-    println!("Ingestion Pass: Compiling and saving content...");
-    for entry in entries {
-        let path = entry.into_path();
-        if let Err(e) = shared_sync_service.handle_file_changed(&path).await {
-            eprintln!("Error during ingestion of {}: {}", path.display(), e);
-        }
-    }
-    println!("Initial content sync complete.");
 
     // start background file watcher
     start_directory_watcher(shared_sync_service.clone(), shared_config.clone());
@@ -126,7 +104,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .nest("/api", api_router)
-        .fallback_service(ServeDir::new(config.frontend_path))
+        .fallback_service(ServeDir::new(config.frontend_path).append_index_html_on_directories(true))
         .with_state(app_state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;

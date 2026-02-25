@@ -19,7 +19,10 @@ async fn get_page_handler(
     State(state): State<AppState>,
     Path(slug): Path<String>,
 ) -> Result<Json<model::JsonPage>, StatusCode> {
-    let page_option = state.sync_service.get_page_by_identifier(&slug).await;
+    // Strip any trailing slashes from the incoming slug
+    let identifier = slug.trim_end_matches('/');
+
+    let page_option: Option<crate::domain::Page> = state.sync_service.get_page_by_identifier(identifier).await;
 
     match page_option {
         None => Err(StatusCode::NOT_FOUND),

@@ -1,5 +1,4 @@
 use crate::config::ChasquiConfig;
-use crate::database::sqlite::SqliteRepository;
 use crate::services::sync::SyncService;
 use notify::{EventKind, RecursiveMode, Watcher};
 use reqwest::Client;
@@ -8,7 +7,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::mpsc;
-use walkdir;
 
 const DEBOUNCE_MS: u64 = 1500;
 
@@ -20,7 +18,7 @@ enum SyncCommand {
 
 /// Spawns a background task that watches for file changes and syncs the database.
 pub fn start_directory_watcher(
-    sync_service: Arc<SyncService<SqliteRepository>>,
+    sync_service: Arc<SyncService>,
     config: Arc<ChasquiConfig>,
 ) {
     // the conveyor belt
@@ -134,41 +132,22 @@ pub fn start_directory_watcher(
 
             // 3. Process the accumulated batch
             if needs_full_sync.swap(false, Ordering::SeqCst) {
-                println!("Executing Fallback Full Directory Sync...");
-                for entry in walkdir::WalkDir::new(&worker_config.content_dir)
-                    .into_iter()
-                    .filter_map(|e| e.ok())
-                {
-                    if entry.file_type().is_file()
-                        && entry.path().extension().and_then(|s| s.to_str()) == Some("md")
-                    {
-                        let path = entry.into_path();
-                        if let Err(e) = worker_sync_service.handle_file_changed(&path).await {
-                            eprintln!("Error during full sync of {}: {}", path.display(), e);
-                        } else {
-                            sync_occurred = true;
-                        }
-                    }
+                if let Err(e) = worker_sync_service.full_sync().await {
+                    eprintln!("Error during fallback full sync: {}", e);
+                } else {
+                    sync_occurred = true;
                 }
                 // Clear the sets as full sync covers everything
                 pending_changes.clear();
                 pending_deletions.clear();
             } else {
-                // Process accumulated deletions
-                for path in pending_deletions.drain() {
-                    println!("Processing batch file deletion: {:?}", path);
-                    if let Err(e) = worker_sync_service.handle_file_deleted(&path).await {
-                        eprintln!("Error processing file deletion {}: {}", path.display(), e);
-                    } else {
-                        sync_occurred = true;
-                    }
-                }
+                // Collect into vectors for the batch call
+                let changes: Vec<PathBuf> = pending_changes.drain().collect();
+                let deletions: Vec<PathBuf> = pending_deletions.drain().collect();
 
-                // Process accumulated changes
-                for path in pending_changes.drain() {
-                    println!("Processing batch file change: {:?}", path);
-                    if let Err(e) = worker_sync_service.handle_file_changed(&path).await {
-                        eprintln!("Error processing file change {}: {}", path.display(), e);
+                if !changes.is_empty() || !deletions.is_empty() {
+                    if let Err(e) = worker_sync_service.process_batch(changes, deletions).await {
+                        eprintln!("Error processing batch: {}", e);
                     } else {
                         sync_occurred = true;
                     }
