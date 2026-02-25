@@ -5,3 +5,4 @@ tar.sh
 .env
 buildlog.txt
 db/
+GEMINI.md
