@@ -82,17 +82,56 @@ pub fn start_directory_watcher(
         let _kept_alive_watcher = watcher;
         let http_client = Client::new();
 
-        // Check the channel for messages
-        while let Some(command) = rx.recv().await {
+        let mut pending_changes = std::collections::HashSet::new();
+        let mut pending_deletions = std::collections::HashSet::new();
+
+        loop {
+            // 1. Wait for the FIRST message to arrive
+            let first_cmd = match rx.recv().await {
+                Some(cmd) => cmd,
+                None => break, // Channel closed, exit worker
+            };
+
+            // Add first message to the appropriate set
+            match first_cmd {
+                SyncCommand::SingleFile(p) => {
+                    pending_changes.insert(p.clone());
+                    pending_deletions.remove(&p);
+                }
+                SyncCommand::DeleteFile(p) => {
+                    pending_deletions.insert(p.clone());
+                    pending_changes.remove(&p);
+                }
+            }
+
+            // 2. Collection Mode: Continue picking up messages until we see 500ms of silence
+            loop {
+                let timeout = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
+
+                match timeout {
+                    Ok(Some(cmd)) => {
+                        // More activity! Add to sets and reset the silence timer
+                        match cmd {
+                            SyncCommand::SingleFile(p) => {
+                                pending_changes.insert(p.clone());
+                                pending_deletions.remove(&p);
+                            }
+                            SyncCommand::DeleteFile(p) => {
+                                pending_deletions.insert(p.clone());
+                                pending_changes.remove(&p);
+                            }
+                        }
+                    }
+                    Ok(None) => break, // Channel closed
+                    Err(_) => break,   // 500ms of silence reached! Proceed to processing
+                }
+            }
+
             let mut sync_occurred = false;
 
-            // did we overflow while we were busy?
-            // swap(false) reads the current value and resets it to false atomically,
-            // again using Ordering::SeqCst to propogate the lowering the flag to all threads
+            // 3. Process the accumulated batch
             if needs_full_sync.swap(false, Ordering::SeqCst) {
                 println!("Executing Fallback Full Directory Sync...");
-
-                // iterate through content directory and process all files
                 for entry in walkdir::WalkDir::new(&worker_config.content_dir)
                     .into_iter()
                     .filter_map(|e| e.ok())
@@ -104,42 +143,44 @@ pub fn start_directory_watcher(
                         if let Err(e) = worker_sync_service.handle_file_changed(&path).await {
                             eprintln!("Error during full sync of {}: {}", path.display(), e);
                         } else {
-                            sync_occurred = true; // Mark sync as occurred if at least one file is processed successfully
+                            sync_occurred = true;
                         }
                     }
                 }
-
-                // clear queue (we just synced the whole file system)
-                while let Ok(_) = rx.try_recv() {}
+                // Clear the sets as full sync covers everything
+                pending_changes.clear();
+                pending_deletions.clear();
             } else {
-                match command {
-                    // handle updates
-                    SyncCommand::SingleFile(path) => {
-                        println!("Processing single file change: {:?}", path);
-                        if let Err(e) = worker_sync_service.handle_file_changed(&path).await {
-                            eprintln!("Error processing file change {}: {}", path.display(), e);
-                        } else {
-                            sync_occurred = true;
-                        }
+                // Process accumulated deletions
+                for path in pending_deletions.drain() {
+                    println!("Processing batch file deletion: {:?}", path);
+                    if let Err(e) = worker_sync_service.handle_file_deleted(&path).await {
+                        eprintln!("Error processing file deletion {}: {}", path.display(), e);
+                    } else {
+                        sync_occurred = true;
                     }
-                    // handle deletions
-                    SyncCommand::DeleteFile(path) => {
-                        println!("Processing single file deletion: {:?}", path);
-                        if let Err(e) = worker_sync_service.handle_file_deleted(&path).await {
-                            eprintln!("Error processing file deletion {}: {}", path.display(), e);
-                        } else {
-                            sync_occurred = true;
-                        }
+                }
+
+                // Process accumulated changes
+                for path in pending_changes.drain() {
+                    println!("Processing batch file change: {:?}", path);
+                    if let Err(e) = worker_sync_service.handle_file_changed(&path).await {
+                        eprintln!("Error processing file change {}: {}", path.display(), e);
+                    } else {
+                        sync_occurred = true;
                     }
                 }
             }
 
+            // 4. Trigger build ONCE per batch
             if sync_occurred {
-                trigger_frontend_build(&http_client, &worker_config.webhook_url, &worker_config.webhook_secret)
-                    .await;
+                trigger_frontend_build(
+                    &http_client,
+                    &worker_config.webhook_url,
+                    &worker_config.webhook_secret,
+                )
+                .await;
             }
-
-            tokio::time::sleep(Duration::from_millis(500)).await;
         }
     });
 }
