@@ -7,6 +7,8 @@ pub struct ChasquiConfig {
     pub frontend_path: PathBuf,
     pub content_dir: PathBuf,
     pub strip_extensions: bool,
+    pub serve_home: bool,
+    pub home_identifier: String,
     pub webhook_url: String,
     pub webhook_secret: String,
 }
@@ -35,6 +37,13 @@ impl ChasquiConfig {
             .unwrap_or_else(|_| "false".to_string())
             == "true";
 
+        let serve_home = std::env::var("ROUTER_SERVE_HOME_AT_DEFAULT")
+            .unwrap_or_else(|_| "true".to_string())
+            == "true";
+
+        let home_identifier =
+            std::env::var("HOME_IDENTIFIER").unwrap_or_else(|_| "index".to_string());
+
         let webhook_url = std::env::var("FRONTEND_WEBHOOK_URL")
             .unwrap_or_else(|_| "http://127.0.0.1:4000/build".to_string());
 
@@ -46,6 +55,8 @@ impl ChasquiConfig {
             frontend_path,
             content_dir,
             strip_extensions,
+            serve_home,
+            home_identifier,
             webhook_url,
             webhook_secret,
         }
