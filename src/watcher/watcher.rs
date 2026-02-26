@@ -17,8 +17,8 @@ pub enum SyncCommand {
 
 /// Spawns the background task and the OS watcher.
 pub fn start_directory_watcher(
-    sync_service: Arc<SyncService>, 
-    config: Arc<ChasquiConfig>
+    sync_service: Arc<SyncService>,
+    config: Arc<ChasquiConfig>,
 ) -> mpsc::Sender<SyncCommand> {
     let (tx, rx) = mpsc::channel::<SyncCommand>(100);
     let tx_clone = tx.clone();
@@ -40,7 +40,9 @@ pub fn start_directory_watcher(
                 }
 
                 let command = match event.kind {
-                    EventKind::Create(_) | EventKind::Modify(_) => Some(SyncCommand::SingleFile(path.clone())),
+                    EventKind::Create(_) | EventKind::Modify(_) => {
+                        Some(SyncCommand::SingleFile(path.clone()))
+                    }
                     EventKind::Remove(_) => Some(SyncCommand::DeleteFile(path.clone())),
                     _ => None,
                 };
@@ -52,9 +54,11 @@ pub fn start_directory_watcher(
                 }
             }
         }
-    }).expect("Failed to initialize file watcher");
+    })
+    .expect("Failed to initialize file watcher");
 
-    watcher.watch(&config.content_dir, RecursiveMode::Recursive)
+    watcher
+        .watch(&config.content_dir, RecursiveMode::Recursive)
         .expect("Failed to watch content directory");
 
     // We must keep the watcher alive, so we leak it or return it.
@@ -65,6 +69,11 @@ pub fn start_directory_watcher(
 }
 
 /// The core logic loop that handles debouncing and batching.
+// when we recieve a file update:
+// T+0: wait N ms. add this update to the appropriate pool
+// T+N: any more edits?
+// yes: wait N more ms. add these updates to the appropriate pool
+// no: give the sync service a "batch" of files it must implement into the database and validate
 pub async fn run_watcher_worker(
     sync_service: Arc<SyncService>,
     mut receiver: mpsc::Receiver<SyncCommand>,
@@ -80,19 +89,30 @@ pub async fn run_watcher_worker(
         };
 
         match first_cmd {
-            SyncCommand::SingleFile(p) => { pending_changes.insert(p.clone()); pending_deletions.remove(&p); }
-            SyncCommand::DeleteFile(p) => { pending_deletions.insert(p.clone()); pending_changes.remove(&p); }
+            SyncCommand::SingleFile(p) => {
+                pending_changes.insert(p.clone());
+                pending_deletions.remove(&p);
+            }
+            SyncCommand::DeleteFile(p) => {
+                pending_deletions.insert(p.clone());
+                pending_changes.remove(&p);
+            }
         }
 
         loop {
-            let timeout = tokio::time::timeout(Duration::from_millis(DEBOUNCE_MS), receiver.recv()).await;
+            let timeout =
+                tokio::time::timeout(Duration::from_millis(DEBOUNCE_MS), receiver.recv()).await;
             match timeout {
-                Ok(Some(cmd)) => {
-                    match cmd {
-                        SyncCommand::SingleFile(p) => { pending_changes.insert(p.clone()); pending_deletions.remove(&p); }
-                        SyncCommand::DeleteFile(p) => { pending_deletions.insert(p.clone()); pending_changes.remove(&p); }
+                Ok(Some(cmd)) => match cmd {
+                    SyncCommand::SingleFile(p) => {
+                        pending_changes.insert(p.clone());
+                        pending_deletions.remove(&p);
                     }
-                }
+                    SyncCommand::DeleteFile(p) => {
+                        pending_deletions.insert(p.clone());
+                        pending_changes.remove(&p);
+                    }
+                },
                 Ok(None) => break,
                 Err(_) => break,
             }
@@ -100,16 +120,22 @@ pub async fn run_watcher_worker(
 
         let mut sync_occurred = false;
         if needs_full_sync.swap(false, Ordering::SeqCst) {
-            if let Err(e) = sync_service.full_sync().await { eprintln!("Error: {}", e); }
-            else { sync_occurred = true; }
+            if let Err(e) = sync_service.full_sync().await {
+                eprintln!("Error: {}", e);
+            } else {
+                sync_occurred = true;
+            }
             pending_changes.clear();
             pending_deletions.clear();
         } else {
             let changes: Vec<PathBuf> = pending_changes.drain().collect();
             let deletions: Vec<PathBuf> = pending_deletions.drain().collect();
             if !changes.is_empty() || !deletions.is_empty() {
-                if let Err(e) = sync_service.process_batch(changes, deletions).await { eprintln!("Error: {}", e); }
-                else { sync_occurred = true; }
+                if let Err(e) = sync_service.process_batch(changes, deletions).await {
+                    eprintln!("Error: {}", e);
+                } else {
+                    sync_occurred = true;
+                }
             }
         }
 

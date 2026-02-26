@@ -1,8 +1,10 @@
-use async_trait::async_trait;
 use anyhow::Result;
+use async_trait::async_trait;
 use reqwest::Client;
 
 pub mod sync;
+
+pub use crate::services::sync::sync::SyncService;
 
 #[async_trait]
 pub trait ContentBuildNotifier: Send + Sync {
@@ -29,7 +31,8 @@ impl WebhookBuildNotifier {
 impl ContentBuildNotifier for WebhookBuildNotifier {
     async fn notify(&self) -> Result<()> {
         println!("WebhookBuildNotifier: Triggering build at {}...", self.url);
-        let res = self.client
+        let res = self
+            .client
             .post(&self.url)
             .header("Authorization", format!("Bearer {}", self.secret))
             .send()
@@ -41,7 +44,10 @@ impl ContentBuildNotifier for WebhookBuildNotifier {
                 Ok(())
             }
             Ok(response) => {
-                anyhow::bail!("Frontend rejected build request. Status: {}", response.status());
+                anyhow::bail!(
+                    "Frontend rejected build request. Status: {}",
+                    response.status()
+                );
             }
             Err(e) => {
                 anyhow::bail!("Failed to connect to frontend webhook: {}", e);
