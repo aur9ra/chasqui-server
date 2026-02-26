@@ -309,8 +309,14 @@ async fn test_sync_service_datetime_resolution() {
     let notifier = MockBuildNotifier::new();
     let config = mock_config(PathBuf::from("/content"));
 
-    let time_a = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap().and_hms_opt(0, 0, 0).unwrap();
-    let time_b = NaiveDate::from_ymd_opt(2026, 12, 25).unwrap().and_hms_opt(0, 0, 0).unwrap();
+    let time_a = NaiveDate::from_ymd_opt(2026, 1, 1)
+        .unwrap()
+        .and_hms_opt(0, 0, 0)
+        .unwrap();
+    let time_b = NaiveDate::from_ymd_opt(2026, 12, 25)
+        .unwrap()
+        .and_hms_opt(0, 0, 0)
+        .unwrap();
     let time_b_str = "2026-12-25T00:00:00Z";
 
     let service = SyncService::new(
@@ -326,20 +332,25 @@ async fn test_sync_service_datetime_resolution() {
     reader.add_file_with_metadata("/content/fs_only.md", "# Title", Some(time_a), Some(time_a));
 
     // 2. FM ONLY -> Should resolve to time_b
-    reader.add_file("/content/fm_only.md", &format!("---\nmodified_datetime: {}\n---\n# Title", time_b_str));
+    reader.add_file(
+        "/content/fm_only.md",
+        &format!("---\nmodified_datetime: {}\n---\n# Title", time_b_str),
+    );
 
     // 3. BOTH (FM wins) -> Should resolve to time_b
     reader.add_file_with_metadata(
-        "/content/both.md", 
-        &format!("---\nmodified_datetime: {}\n---\n# Title", time_b_str), 
-        Some(time_a), Some(time_a)
+        "/content/both.md",
+        &format!("---\nmodified_datetime: {}\n---\n# Title", time_b_str),
+        Some(time_a),
+        Some(time_a),
     );
 
     // 4. MALFORMED FM + FS (FS wins) -> Should resolve to time_a
     reader.add_file_with_metadata(
-        "/content/malformed_fallback.md", 
-        "---\nmodified_datetime: garbage\n---\n# Title", 
-        Some(time_a), Some(time_a)
+        "/content/malformed_fallback.md",
+        "---\nmodified_datetime: garbage\n---\n# Title",
+        Some(time_a),
+        Some(time_a),
     );
 
     // 5. Total Void (No FS, No FM) -> Should resolve to None
@@ -357,7 +368,10 @@ async fn test_sync_service_datetime_resolution() {
     let p3 = service.get_page_by_identifier("both").await.unwrap();
     assert_eq!(p3.modified_datetime, Some(time_b));
 
-    let p4 = service.get_page_by_identifier("malformed_fallback").await.unwrap();
+    let p4 = service
+        .get_page_by_identifier("malformed_fallback")
+        .await
+        .unwrap();
     assert_eq!(p4.modified_datetime, Some(time_a));
 
     let p5 = service.get_page_by_identifier("void").await.unwrap();
@@ -380,5 +394,33 @@ async fn test_sync_service_relative_path_resolution() {
     .await
     .unwrap();
 
-    // 
+    // 1. Setup deep hierarchy
+    // Root file linking deep
+    reader.add_file("/content/z.md", "# Root\n[Deep Link](./a/b/c/d/e/f)");
+    // Deep file linking back to root
+    reader.add_file("/content/a/b/c/d/e/f.md", "# Deep\n[Z Link](../../../../../z.md)");
+    // Sibling link
+    reader.add_file("/content/a/b/start.md", "# Sibling\n[Sibling Link](./other.md)");
+    reader.add_file("/content/a/b/other.md", "# Other");
+
+    // 2. Escape attempt (security boundary)
+    reader.add_file("/content/boundary.md", "[Forbidden](../outside.md)");
+
+    service.full_sync().await.unwrap();
+
+    // ASSERT: Deep Link resolution (z -> f)
+    let z = service.get_page_by_identifier("z").await.unwrap();
+    assert!(z.html_content.contains(r#"href="/a/b/c/d/e/f""#));
+
+    // ASSERT: Relative Filename resolution (f -> z)
+    let f = service.get_page_by_identifier("a/b/c/d/e/f").await.unwrap();
+    assert!(f.html_content.contains(r#"href="/z""#));
+
+    // ASSERT: Sibling resolution
+    let sibling = service.get_page_by_identifier("a/b/start").await.unwrap();
+    assert!(sibling.html_content.contains(r#"href="/a/b/other""#));
+
+    // ASSERT: Escape attempt remains unchanged (safe failure)
+    let boundary = service.get_page_by_identifier("boundary").await.unwrap();
+    assert!(boundary.html_content.contains(r#"href="../outside.md""#));
 }
