@@ -1,15 +1,22 @@
-use crate::watcher::watcher::{run_watcher_worker, SyncCommand};
-use crate::services::sync::SyncService;
-use crate::tests::integration_pages_sync_service::{MockRepository, MockContentReader, MockBuildNotifier};
 use crate::config::ChasquiConfig;
+use crate::services::sync::SyncService;
+use crate::tests::integration_pages_sync_service::{
+    MockBuildNotifier, MockContentReader, MockRepository,
+};
+use crate::watcher::watcher::{SyncCommand, run_watcher_worker};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::path::PathBuf;
 use tokio::sync::mpsc;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 // helper to setup a fresh service and mock world for watcher testing
-async fn setup_service() -> (Arc<SyncService>, MockContentReader, MockBuildNotifier, Arc<ChasquiConfig>) {
+async fn setup_service() -> (
+    Arc<SyncService>,
+    MockContentReader,
+    MockBuildNotifier,
+    Arc<ChasquiConfig>,
+) {
     let repo = MockRepository::new();
     let reader = MockContentReader::new();
     let notifier = MockBuildNotifier::new();
@@ -27,12 +34,14 @@ async fn setup_service() -> (Arc<SyncService>, MockContentReader, MockBuildNotif
     });
 
     let service = SyncService::new(
-        Box::new(repo), 
-        Box::new(reader.clone()), 
-        Box::new(notifier.clone()), 
-        config.clone()
-    ).await.unwrap();
-    
+        Box::new(repo),
+        Box::new(reader.clone()),
+        Box::new(notifier.clone()),
+        config.clone(),
+    )
+    .await
+    .unwrap();
+
     (Arc::new(service), reader, notifier, config)
 }
 
@@ -51,7 +60,9 @@ async fn test_watcher_worker_batching() {
     for i in 0..50 {
         let path = format!("/content/file_{}.md", i);
         reader.add_file(&path, "# Content");
-        tx.send(SyncCommand::SingleFile(PathBuf::from(path))).await.unwrap();
+        tx.send(SyncCommand::SingleFile(PathBuf::from(path)))
+            .await
+            .unwrap();
     }
 
     // wait for the 1.5s debounce window to close
@@ -77,13 +88,17 @@ async fn test_watcher_worker_full_sync_trigger() {
 
     // send just one event
     reader.add_file("/content/trigger.md", "# Trigger");
-    tx.send(SyncCommand::SingleFile(PathBuf::from("/content/trigger.md"))).await.unwrap();
+    tx.send(SyncCommand::SingleFile(PathBuf::from(
+        "/content/trigger.md",
+    )))
+    .await
+    .unwrap();
 
     // hide a file in the "file system" that we never sent an event for
     reader.add_file("/content/background.md", "# Existed already");
-    
+
     sleep(Duration::from_millis(2500)).await;
-    
+
     // because the flag was set, the system should have scanned EVERYTHING, finding both files
     assert_eq!(service.get_all_pages().await.len(), 2);
 }
@@ -100,10 +115,12 @@ async fn test_watcher_worker_redundant_commands() {
 
     let path = PathBuf::from("/content/redundant.md");
     reader.add_file("/content/redundant.md", "# Content");
-    
+
     // send the exact same command 20 times in a row
     for _ in 0..20 {
-        tx.send(SyncCommand::SingleFile(path.clone())).await.unwrap();
+        tx.send(SyncCommand::SingleFile(path.clone()))
+            .await
+            .unwrap();
     }
 
     sleep(Duration::from_millis(2500)).await;
@@ -127,12 +144,18 @@ async fn test_watcher_worker_add_delete_recreate_cancellation() {
 
     // add, delete, and add again in rapid succession
     reader.add_file("/content/flicker.md", "# Version 1");
-    tx.send(SyncCommand::SingleFile(path.clone())).await.unwrap();
+    tx.send(SyncCommand::SingleFile(path.clone()))
+        .await
+        .unwrap();
 
-    tx.send(SyncCommand::DeleteFile(path.clone())).await.unwrap();
+    tx.send(SyncCommand::DeleteFile(path.clone()))
+        .await
+        .unwrap();
 
     reader.add_file("/content/flicker.md", "# Version 2");
-    tx.send(SyncCommand::SingleFile(path.clone())).await.unwrap();
+    tx.send(SyncCommand::SingleFile(path.clone()))
+        .await
+        .unwrap();
 
     sleep(Duration::from_millis(2500)).await;
 
