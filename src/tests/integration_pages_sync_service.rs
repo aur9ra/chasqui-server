@@ -6,6 +6,7 @@ use crate::services::ContentBuildNotifier;
 use crate::services::sync::SyncService;
 use anyhow::Result;
 use async_trait::async_trait;
+use chrono::NaiveDate;
 use chrono::NaiveDateTime;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -210,7 +211,7 @@ async fn test_sync_service_discovery_and_ingestion() {
 // at startup: A -> B && B -> A: OK
 // new batch: A -> B && B -> A: OK
 #[tokio::test]
-async fn test_sync_service_chaos_and_resilience() {
+async fn test_sync_service_link_validation() {
     let repo = MockRepository::new();
     let reader = MockContentReader::new();
     let notifier = MockBuildNotifier::new();
@@ -230,6 +231,7 @@ async fn test_sync_service_chaos_and_resilience() {
     // the system should handle this without getting stuck
     reader.add_file("/content/a.md", "[Go to B](b.md)");
     reader.add_file("/content/b.md", "[Go to A](a.md)");
+    // equivalent to service.process_batch.[a,b]
     service.full_sync().await.unwrap();
 
     let page_a = service.get_page_by_identifier("a").await.unwrap();
@@ -238,8 +240,8 @@ async fn test_sync_service_chaos_and_resilience() {
     assert!(page_a.html_content.contains(r#"href="/b""#));
     assert!(page_b.html_content.contains(r#"href="/a""#));
 
-    // Scenario: Rename with same identifier
-    // Move a.md -> c.md, but keep identifier "a" in the metadata
+    // rename with same identifier
+    // move a.md -> c.md, but keep identifier "a" in the metadata
     {
         reader.add_file("/content/c.md", "---\nidentifier: a\n---\nNew location");
     }
@@ -297,4 +299,86 @@ async fn test_sync_service_identifier_collision_reject_both() {
     // BOTH should be rejected
     let pages = service.get_all_pages().await;
     assert_eq!(pages.len(), 0);
+}
+
+// verify proper resolution of Page created/modified times
+#[tokio::test]
+async fn test_sync_service_datetime_resolution() {
+    let repo = MockRepository::new();
+    let reader = MockContentReader::new();
+    let notifier = MockBuildNotifier::new();
+    let config = mock_config(PathBuf::from("/content"));
+
+    let time_a = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap().and_hms_opt(0, 0, 0).unwrap();
+    let time_b = NaiveDate::from_ymd_opt(2026, 12, 25).unwrap().and_hms_opt(0, 0, 0).unwrap();
+    let time_b_str = "2026-12-25T00:00:00Z";
+
+    let service = SyncService::new(
+        Box::new(repo.clone()),
+        Box::new(reader.clone()),
+        Box::new(notifier.clone()),
+        config.clone(),
+    )
+    .await
+    .unwrap();
+
+    // 1. FS Meta ONLY -> Should resolve to time_a
+    reader.add_file_with_metadata("/content/fs_only.md", "# Title", Some(time_a), Some(time_a));
+
+    // 2. FM ONLY -> Should resolve to time_b
+    reader.add_file("/content/fm_only.md", &format!("---\nmodified_datetime: {}\n---\n# Title", time_b_str));
+
+    // 3. BOTH (FM wins) -> Should resolve to time_b
+    reader.add_file_with_metadata(
+        "/content/both.md", 
+        &format!("---\nmodified_datetime: {}\n---\n# Title", time_b_str), 
+        Some(time_a), Some(time_a)
+    );
+
+    // 4. MALFORMED FM + FS (FS wins) -> Should resolve to time_a
+    reader.add_file_with_metadata(
+        "/content/malformed_fallback.md", 
+        "---\nmodified_datetime: garbage\n---\n# Title", 
+        Some(time_a), Some(time_a)
+    );
+
+    // 5. Total Void (No FS, No FM) -> Should resolve to None
+    reader.add_file("/content/void.md", "# Title");
+
+    service.full_sync().await.unwrap();
+
+    // Assertions
+    let p1 = service.get_page_by_identifier("fs_only").await.unwrap();
+    assert_eq!(p1.modified_datetime, Some(time_a));
+
+    let p2 = service.get_page_by_identifier("fm_only").await.unwrap();
+    assert_eq!(p2.modified_datetime, Some(time_b));
+
+    let p3 = service.get_page_by_identifier("both").await.unwrap();
+    assert_eq!(p3.modified_datetime, Some(time_b));
+
+    let p4 = service.get_page_by_identifier("malformed_fallback").await.unwrap();
+    assert_eq!(p4.modified_datetime, Some(time_a));
+
+    let p5 = service.get_page_by_identifier("void").await.unwrap();
+    assert_eq!(p5.modified_datetime, None);
+}
+
+#[tokio::test]
+async fn test_sync_service_relative_path_resolution() {
+    let repo = MockRepository::new();
+    let reader = MockContentReader::new();
+    let notifier = MockBuildNotifier::new();
+    let config = mock_config(PathBuf::from("/content"));
+
+    let service = SyncService::new(
+        Box::new(repo.clone()),
+        Box::new(reader.clone()),
+        Box::new(notifier.clone()),
+        config.clone(),
+    )
+    .await
+    .unwrap();
+
+    // 
 }
