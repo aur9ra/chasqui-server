@@ -12,6 +12,7 @@ pub trait ContentReader: Send + Sync {
     async fn list_markdown_files(&self, root: &Path) -> Result<Vec<PathBuf>>;
 }
 
+#[derive(Clone)]
 pub struct ContentMetadata {
     pub modified: Option<NaiveDateTime>,
     pub created: Option<NaiveDateTime>,

@@ -31,6 +31,17 @@ pub struct JsonPage {
     pub created_datetime: Option<String>,
 }
 
+pub struct PageDraft {
+    pub filename: String,
+    pub identifier: String,
+    pub name: Option<String>,
+    pub content_body: String,
+    pub md_content_hash: String,
+    pub tags: Vec<String>,
+    pub modified_datetime: Option<NaiveDateTime>,
+    pub created_datetime: Option<NaiveDateTime>,
+}
+
 impl TryFrom<DbPage> for Page {
     type Error = anyhow::Error;
 
