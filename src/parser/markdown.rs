@@ -5,28 +5,37 @@ use pulldown_cmark::{Event, Options as CmarkOptions, Parser, Tag, html};
 
 // extracts YAML frontmatter and returns the typed metadata alongside the raw markdown body
 pub fn extract_frontmatter(md_content: &str, filename: &str) -> Result<(PageFrontMatter, String)> {
-    let matter = Matter::<YAML>::new();
-
-    // Soft Check: If it doesn't look like it has frontmatter delimiters, don't even try to parse
+    // Soft Check: If it doesn't start with delimiters, it's just content
     if !md_content.starts_with("---") {
         return Ok((PageFrontMatter::default(), md_content.to_string()));
     }
 
-    // explicitly tell 'parse' with epic turbofish syntax to use our PageFrontMatter struct for <D>
-    let parsed_matter = match matter.parse::<PageFrontMatter>(md_content) {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("Warning: Malformed YAML frontmatter in {}. Using defaults. Error: {}", filename, e);
-            // If parsing fails, we need to manually find where the frontmatter ends to return the content
-            // or just return the whole thing if we can't be sure.
-            // gray_matter's failure usually means the '---' blocks were there but the content was garbage.
-            return Ok((PageFrontMatter::default(), md_content.to_string()));
-        }
-    };
+    // Find the closing delimiter. We search after the first "---" (3 chars)
+    if let Some(end_offset) = md_content[3..].find("---") {
+        let closing_start = end_offset + 3;
+        let body_start = closing_start + 3;
 
-    let frontmatter = parsed_matter.data.unwrap_or_default();
+        let frontmatter_block = &md_content[..body_start];
+        let body_content = &md_content[body_start..];
 
-    Ok((frontmatter, parsed_matter.content))
+        let matter = Matter::<YAML>::new();
+        return match matter.parse::<PageFrontMatter>(frontmatter_block) {
+            Ok(parsed) => Ok((
+                parsed.data.unwrap_or_default(),
+                body_content.trim_start().to_string(),
+            )),
+            Err(e) => {
+                eprintln!(
+                    "Warning: Malformed YAML frontmatter in {}. Using defaults. Error: {}",
+                    filename, e
+                );
+                Ok((PageFrontMatter::default(), body_content.trim_start().to_string()))
+            }
+        };
+    }
+
+    // No closing "---" found: treat the whole thing as content
+    Ok((PageFrontMatter::default(), md_content.to_string()))
 }
 
 // compiles markdown content into HTML, and resolves links on-the-fly using the provided resolver
