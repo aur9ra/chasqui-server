@@ -398,9 +398,15 @@ async fn test_sync_service_relative_path_resolution() {
     // Root file linking deep
     reader.add_file("/content/z.md", "# Root\n[Deep Link](./a/b/c/d/e/f)");
     // Deep file linking back to root
-    reader.add_file("/content/a/b/c/d/e/f.md", "# Deep\n[Z Link](../../../../../z.md)");
+    reader.add_file(
+        "/content/a/b/c/d/e/f.md",
+        "# Deep\n[Z Link](../../../../../z.md)",
+    );
     // Sibling link
-    reader.add_file("/content/a/b/start.md", "# Sibling\n[Sibling Link](./other.md)");
+    reader.add_file(
+        "/content/a/b/start.md",
+        "# Sibling\n[Sibling Link](./other.md)",
+    );
     reader.add_file("/content/a/b/other.md", "# Other");
 
     // 2. Escape attempt (security boundary)

@@ -1,21 +1,28 @@
-use crate::io::{ContentMetadata, ContentReader};
+use crate::io::{
+    verified_fs_metadata, verified_fs_read_to_string, verify_absolute_path, ContentMetadata,
+    ContentReader,
+};
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-pub struct LocalContentReader;
+pub struct LocalContentReader {
+    pub root_path: PathBuf,
+}
 
 #[async_trait]
 impl ContentReader for LocalContentReader {
     async fn read_to_string(&self, path: &Path) -> Result<String> {
-        Ok(fs::read_to_string(path)?)
+        let verified = verify_absolute_path(&self.root_path, path)?;
+        verified_fs_read_to_string(verified)
     }
 
     async fn get_metadata(&self, path: &Path) -> Result<ContentMetadata> {
-        let metadata = fs::metadata(path)?;
+        let verified = verify_absolute_path(&self.root_path, path)?;
+        let metadata = verified_fs_metadata(verified)?;
+
         let modified = metadata
             .modified()
             .ok()

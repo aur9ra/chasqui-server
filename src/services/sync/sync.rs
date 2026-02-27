@@ -175,12 +175,12 @@ impl SyncService {
         changes: Vec<std::path::PathBuf>,
         deletions: Vec<std::path::PathBuf>,
     ) -> Result<()> {
-        // 1. Priority: Purge Deletions
+        // purge deletions
         for path in deletions {
             self.handle_file_deleted(&path).await?;
         }
 
-        // 2. Discovery Pass: Read and parse all changes into drafts
+        // parse all changes into Vec<PageDraft>
         let mut drafts = Vec::new();
         for path in &changes {
             match self.discover_page_draft(path).await {

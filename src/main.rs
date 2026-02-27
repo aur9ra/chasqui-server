@@ -71,7 +71,9 @@ async fn main() -> anyhow::Result<()> {
     let repository = SqliteRepository::new(pool.clone());
 
     // initialize content reader
-    let reader = io::local::LocalContentReader;
+    let reader = io::local::LocalContentReader {
+        root_path: config.content_dir.clone(),
+    };
 
     // initialize notifier
     let notifier = services::WebhookBuildNotifier::new(
