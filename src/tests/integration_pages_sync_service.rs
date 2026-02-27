@@ -212,6 +212,9 @@ async fn test_sync_service_discovery_and_ingestion() {
 // new batch: A -> B && B -> A: OK
 #[tokio::test]
 async fn test_sync_service_link_validation() {
+    // TODO: this is sort of a strange mega test.
+    // in the future, there will be a config to not prevent page pushing to db on bad links, so we
+    // will have to split this up anyways
     let repo = MockRepository::new();
     let reader = MockContentReader::new();
     let notifier = MockBuildNotifier::new();
