@@ -107,3 +107,41 @@ fn test_parsing_malformed_frontmatter() {
     assert!(fm.identifier.is_none());
     assert_eq!(body.trim(), expected_body);
 }
+
+#[test]
+fn test_polymorphic_embedding_image() {
+    let input = "![An image](photo.jpg)";
+    let result = compile_markdown_to_html(input, |url| format!("/resolved/{}", url)).unwrap();
+    
+    // Should render as standard <img>
+    assert!(result.contains(r#"<img src="/resolved/photo.jpg" alt="An image" />"#));
+}
+
+#[test]
+fn test_polymorphic_embedding_video() {
+    let input = "![A cool video](demo.mp4)";
+    let result = compile_markdown_to_html(input, |url| format!("/resolved/{}", url)).unwrap();
+    
+    // Should render as <video> with aria-label
+    assert!(result.contains(r#"<video controls aria-label="A cool video">"#));
+    assert!(result.contains(r#"<source src="/resolved/demo.mp4" type="video/mp4">"#));
+}
+
+#[test]
+fn test_polymorphic_embedding_audio() {
+    let input = "![Sweet music](tune.mp3)";
+    let result = compile_markdown_to_html(input, |url| format!("/resolved/{}", url)).unwrap();
+    
+    // Should render as <audio> with aria-label
+    assert!(result.contains(r#"<audio controls aria-label="Sweet music">"#));
+    assert!(result.contains(r#"<source src="/resolved/tune.mp3" type="audio/mpeg">"#));
+}
+
+#[test]
+fn test_polymorphic_embedding_case_insensitivity() {
+    let input = "![Video](CLIP.MOV)";
+    let result = compile_markdown_to_html(input, |url| url.to_string()).unwrap();
+    
+    assert!(result.contains("<video"));
+    assert!(result.contains(r#"src="CLIP.MOV""#));
+}

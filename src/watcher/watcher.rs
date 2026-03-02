@@ -11,7 +11,7 @@ const DEBOUNCE_MS: u64 = 1500;
 
 #[derive(Debug, Clone)]
 pub enum SyncCommand {
-    SingleFile(PathBuf),
+    SingleFile(PathBuf, PathBuf, crate::features::model::FeatureType),
     DeleteFile(PathBuf),
 }
 
@@ -22,6 +22,7 @@ pub fn start_directory_watcher(
 ) -> mpsc::Sender<SyncCommand> {
     let (tx, rx) = mpsc::channel::<SyncCommand>(100);
     let tx_clone = tx.clone();
+    let service_ref = sync_service.clone();
     let needs_full_sync = Arc::new(AtomicBool::new(false));
     let needs_full_sync_worker = needs_full_sync.clone();
 
@@ -32,16 +33,19 @@ pub fn start_directory_watcher(
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if let Ok(event) = res {
             if let Some(path) = event.paths.first() {
-                let ext = path.extension().and_then(|s| s.to_str());
                 let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
 
-                if ext != Some("md") || filename.starts_with('.') || filename.ends_with('~') {
+                if filename.starts_with('.') || filename.ends_with('~') {
                     return;
                 }
 
                 let command = match event.kind {
                     EventKind::Create(_) | EventKind::Modify(_) => {
-                        Some(SyncCommand::SingleFile(path.clone()))
+                        if let Some((mount, f_type)) = service_ref.identify_mount(path) {
+                            Some(SyncCommand::SingleFile(path.clone(), mount.to_path_buf(), f_type))
+                        } else {
+                            None
+                        }
                     }
                     EventKind::Remove(_) => Some(SyncCommand::DeleteFile(path.clone())),
                     _ => None,
@@ -57,9 +61,16 @@ pub fn start_directory_watcher(
     })
     .expect("Failed to initialize file watcher");
 
-    watcher
-        .watch(&config.content_dir, RecursiveMode::Recursive)
-        .expect("Failed to watch content directory");
+    // Watch unique parent directories to avoid redundancy
+    let mut unique_roots = std::collections::HashSet::new();
+    unique_roots.insert(&config.pages_dir);
+    unique_roots.insert(&config.images_dir);
+    unique_roots.insert(&config.audio_dir);
+    unique_roots.insert(&config.videos_dir);
+
+    for root in unique_roots {
+        let _ = watcher.watch(root, RecursiveMode::Recursive);
+    }
 
     // We must keep the watcher alive, so we leak it or return it.
     // Box::leak is a quick way to keep a background task running forever in a CLI app.
@@ -69,17 +80,12 @@ pub fn start_directory_watcher(
 }
 
 /// The core logic loop that handles debouncing and batching.
-// when we recieve a file update:
-// T+0: wait N ms. add this update to the appropriate pool
-// T+N: any more edits?
-// yes: wait N more ms. add these updates to the appropriate pool
-// no: give the sync service a "batch" of files it must implement into the database and validate
 pub async fn run_watcher_worker(
     sync_service: Arc<SyncService>,
     mut receiver: mpsc::Receiver<SyncCommand>,
     needs_full_sync: Arc<AtomicBool>,
 ) {
-    let mut pending_changes = std::collections::HashSet::new();
+    let mut pending_changes = std::collections::HashMap::new();
     let mut pending_deletions = std::collections::HashSet::new();
 
     loop {
@@ -89,8 +95,8 @@ pub async fn run_watcher_worker(
         };
 
         match first_cmd {
-            SyncCommand::SingleFile(p) => {
-                pending_changes.insert(p.clone());
+            SyncCommand::SingleFile(p, m, t) => {
+                pending_changes.insert(p.clone(), (m, t));
                 pending_deletions.remove(&p);
             }
             SyncCommand::DeleteFile(p) => {
@@ -104,8 +110,8 @@ pub async fn run_watcher_worker(
                 tokio::time::timeout(Duration::from_millis(DEBOUNCE_MS), receiver.recv()).await;
             match timeout {
                 Ok(Some(cmd)) => match cmd {
-                    SyncCommand::SingleFile(p) => {
-                        pending_changes.insert(p.clone());
+                    SyncCommand::SingleFile(p, m, t) => {
+                        pending_changes.insert(p.clone(), (m, t));
                         pending_deletions.remove(&p);
                     }
                     SyncCommand::DeleteFile(p) => {
@@ -128,8 +134,10 @@ pub async fn run_watcher_worker(
             pending_changes.clear();
             pending_deletions.clear();
         } else {
-            let changes: Vec<PathBuf> = pending_changes.drain().collect();
+            let changes: Vec<(PathBuf, PathBuf, crate::features::model::FeatureType)> = 
+                pending_changes.drain().map(|(p, (m, t))| (p, m, t)).collect();
             let deletions: Vec<PathBuf> = pending_deletions.drain().collect();
+            
             if !changes.is_empty() || !deletions.is_empty() {
                 if let Err(e) = sync_service.process_batch(changes, deletions).await {
                     eprintln!("Error: {}", e);
@@ -140,7 +148,12 @@ pub async fn run_watcher_worker(
         }
 
         if sync_occurred {
-            let _ = sync_service.notify_build().await;
+            let service_clone = sync_service.clone();
+            tokio::spawn(async move {
+                if let Err(e) = service_clone.notify_build().await {
+                    eprintln!("Sync Service: Build notification failed: {}", e);
+                }
+            });
         }
     }
 }

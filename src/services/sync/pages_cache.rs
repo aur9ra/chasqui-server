@@ -1,4 +1,5 @@
-use crate::domain::Page;
+// TODO: Sunset this file
+use crate::features::pages::model::Page;
 use std::collections::HashMap;
 
 // exists to quickly get a page back for our routes rather than calling the db

@@ -1,8 +1,16 @@
 pub mod unit_markdown_pages_parser;
 pub mod unit_models_pages;
 pub mod unit_io_path_verification;
-pub mod integration_pages_sync_service;
+pub mod integration_sync_core;
+pub mod integration_sync_media;
+pub mod integration_sync_corrupt_data;
+pub mod integration_sync_filesystem_hazards;
+pub mod integration_sync_large_files;
+pub mod integration_sync_database_hazards;
 pub mod integration_pages_directory_watcher;
 pub mod unit_sqlite_pages_database;
 pub mod api_pages_router;
 pub mod api_pages_stress;
+pub mod integration_watcher_mounts;
+pub mod mocks;
+pub mod integration_sync_build_webhook;

@@ -1,12 +1,15 @@
-use crate::database::PageRepository;
-use crate::domain::Page;
-use crate::features::pages::model::DbPage;
-use anyhow::{Context, Result};
+use crate::database::SyncRepository;
+use crate::features::assets::audio::repo::AudioRepository;
+use crate::features::assets::images::repo::ImageRepository;
+use crate::features::assets::videos::repo::VideoRepository;
+use crate::features::model::{Feature, FeatureType};
+use crate::features::pages::repo::PageRepository;
+use anyhow::Result;
 use async_trait::async_trait;
 use sqlx::{Pool, Sqlite};
 
 pub struct SqliteRepository {
-    pool: Pool<Sqlite>,
+    pub pool: Pool<Sqlite>,
 }
 
 impl SqliteRepository {
@@ -16,100 +19,56 @@ impl SqliteRepository {
 }
 
 #[async_trait]
-impl PageRepository for SqliteRepository {
-    async fn get_page_by_identifier(&self, id: &str) -> Result<Option<Page>> {
-        // query the database for the DbPage
-        let db_page_opt =
-            sqlx::query_as::<_, DbPage>("SELECT * FROM pages WHERE identifier LIKE ?")
-                .bind(id)
-                .fetch_optional(&self.pool)
-                .await?;
+impl SyncRepository for SqliteRepository {
+    async fn save_feature(&self, feature: Feature) -> Result<()> {
+        match feature {
+            Feature::Page(page) => self.save_page(&page).await,
+            Feature::Image(img) => self.save_image(&img).await,
+            Feature::Audio(aud) => self.save_audio(&aud).await,
+            Feature::Video(vid) => self.save_video(&vid).await,
+        }
+    }
 
-        // translate to pure Page model
-        match db_page_opt {
-            Some(db_page) => {
-                let page: Page = db_page.try_into()?;
-                Ok(Some(page))
+    async fn get_feature(&self, filename: &str, feature_type: FeatureType) -> Result<Option<Feature>> {
+        match feature_type {
+            FeatureType::Page => Ok(self.get_page_by_filename(filename).await?.map(Feature::Page)),
+            FeatureType::Image => Ok(self.get_image_by_filename(filename).await?.map(Feature::Image)),
+            FeatureType::Audio => Ok(self.get_audio_by_filename(filename).await?.map(Feature::Audio)),
+            FeatureType::Video => Ok(self.get_video_by_filename(filename).await?.map(Feature::Video)),
+        }
+    }
+
+    async fn update_feature(&self, feature: Feature) -> Result<()> {
+        self.save_feature(feature).await
+    }
+
+    async fn delete_feature(&self, filename: &str, feature_type: FeatureType) -> Result<()> {
+        match feature_type {
+            FeatureType::Page => self.delete_page(filename).await,
+            FeatureType::Image => self.delete_image(filename).await,
+            FeatureType::Audio => self.delete_audio(filename).await,
+            FeatureType::Video => self.delete_video(filename).await,
+        }
+    }
+
+    async fn get_all_features(&self, feature_type: FeatureType) -> Result<Vec<Feature>> {
+        match feature_type {
+            FeatureType::Page => {
+                let pages = <Self as PageRepository>::get_all_pages(self).await?;
+                Ok(pages.into_iter().map(Feature::Page).collect())
             }
-            None => Ok(None),
-        }
-    }
-
-    async fn get_page_by_filename(&self, filename: &str) -> Result<Option<Page>> {
-        let db_page_opt = sqlx::query_as::<_, DbPage>("SELECT * FROM pages WHERE filename = ?")
-            .bind(filename)
-            .fetch_optional(&self.pool)
-            .await?;
-
-        match db_page_opt {
-            Some(db_page) => {
-                let page: Page = db_page.try_into()?;
-                Ok(Some(page))
+            FeatureType::Image => {
+                let images = self.get_all_images().await?;
+                Ok(images.into_iter().map(Feature::Image).collect())
             }
-            None => Ok(None),
+            FeatureType::Audio => {
+                let audio = self.get_all_audio().await?;
+                Ok(audio.into_iter().map(Feature::Audio).collect())
+            }
+            FeatureType::Video => {
+                let videos = self.get_all_videos().await?;
+                Ok(videos.into_iter().map(Feature::Video).collect())
+            }
         }
-    }
-
-    async fn get_all_pages(&self) -> Result<Vec<Page>> {
-        let db_pages = sqlx::query_as::<_, DbPage>("SELECT * FROM pages")
-            .fetch_all(&self.pool)
-            .await?;
-
-        let mut pages = Vec::new();
-        for db_page in db_pages {
-            let page: Page = db_page.try_into()?;
-            pages.push(page);
-        }
-
-        Ok(pages)
-    }
-
-    async fn save_page(&self, page: &Page) -> Result<()> {
-        // translate the pure Page down into a DbPage for SQLite
-        let db_page: DbPage = page.into();
-
-        // nifty UPSERT
-        // it's important to have the db do the insert/update
-        sqlx::query!(
-            r#"
-            INSERT INTO pages (
-                identifier, filename, name, html_content, md_content, 
-                md_content_hash, tags, modified_datetime, created_datetime
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(filename) DO UPDATE SET
-                identifier = excluded.identifier,
-                name = excluded.name,
-                html_content = excluded.html_content,
-                md_content = excluded.md_content,
-                md_content_hash = excluded.md_content_hash,
-                tags = excluded.tags,
-                modified_datetime = excluded.modified_datetime,
-                created_datetime = excluded.created_datetime
-            "#,
-            db_page.identifier,
-            db_page.filename,
-            db_page.name,
-            db_page.html_content,
-            db_page.md_content,
-            db_page.md_content_hash,
-            db_page.tags,
-            db_page.modified_datetime,
-            db_page.created_datetime
-        )
-        .execute(&self.pool)
-        .await
-        .context(format!("Failed to save page {}", page.filename))?;
-
-        Ok(())
-    }
-
-    async fn delete_page(&self, filename: &str) -> Result<()> {
-        sqlx::query!("DELETE FROM pages WHERE filename = ?", filename)
-            .execute(&self.pool)
-            .await
-            .context(format!("Failed to delete page {}", filename))?;
-
-        Ok(())
     }
 }

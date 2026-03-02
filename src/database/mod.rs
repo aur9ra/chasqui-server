@@ -1,20 +1,25 @@
-use crate::domain::Page;
+use crate::features::model::{Feature, FeatureType};
 use anyhow::Result;
 use async_trait::async_trait;
 
 pub mod sqlite;
 
-// a pagerepository can be shared between threads (referencable)
-// sqlx::Pool is thread safe
-// generic implementation of page operations, db specific implementations in "sqlite.rs", future:
-// "postgresql.rs", "mysql.rs"
+/// The "Universal Plug" for database operations.
+/// Dispatches generic Feature variants to specialized repositories.
 #[async_trait]
-pub trait PageRepository: Send + Sync {
-    async fn get_page_by_identifier(&self, id: &str) -> Result<Option<Page>>;
-    async fn get_page_by_filename(&self, filename: &str) -> Result<Option<Page>>;
-    async fn get_all_pages(&self) -> Result<Vec<Page>>;
+pub trait SyncRepository: Send + Sync {
+    /// Saves a feature (Insert or Update).
+    async fn save_feature(&self, feature: Feature) -> Result<()>;
 
-    // write operations
-    async fn save_page(&self, page: &Page) -> Result<()>;
-    async fn delete_page(&self, filename: &str) -> Result<()>;
+    /// Fetches a specific feature by its filename.
+    async fn get_feature(&self, filename: &str, feature_type: FeatureType) -> Result<Option<Feature>>;
+
+    /// Updates an existing feature.
+    async fn update_feature(&self, feature: Feature) -> Result<()>;
+
+    /// Deletes a feature from its respective table.
+    async fn delete_feature(&self, filename: &str, feature_type: FeatureType) -> Result<()>;
+
+    /// Retrieves all features of a specific type.
+    async fn get_all_features(&self, feature_type: FeatureType) -> Result<Vec<Feature>>;
 }

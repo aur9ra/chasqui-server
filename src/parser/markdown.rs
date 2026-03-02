@@ -1,7 +1,7 @@
 use crate::parser::model::PageFrontMatter;
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use gray_matter::{Matter, engine::YAML};
-use pulldown_cmark::{Event, Options as CmarkOptions, Parser, Tag, html};
+use pulldown_cmark::{Event, Options as CmarkOptions, Parser, Tag, TagEnd, html};
 
 // extracts YAML frontmatter and returns the typed metadata alongside the raw markdown body
 pub fn extract_frontmatter(md_content: &str, filename: &str) -> Result<(PageFrontMatter, String)> {
@@ -29,7 +29,10 @@ pub fn extract_frontmatter(md_content: &str, filename: &str) -> Result<(PageFron
                     "Warning: Malformed YAML frontmatter in {}. Using defaults. Error: {}",
                     filename, e
                 );
-                Ok((PageFrontMatter::default(), body_content.trim_start().to_string()))
+                Ok((
+                    PageFrontMatter::default(),
+                    body_content.trim_start().to_string(),
+                ))
             }
         };
     }
@@ -46,33 +49,90 @@ where
     let mut options = CmarkOptions::empty();
     options.insert(CmarkOptions::ENABLE_STRIKETHROUGH);
     options.insert(CmarkOptions::ENABLE_TABLES);
+    // enable GFM markdown
 
     let parser = Parser::new_ext(markdown_content, options);
 
     let mut html_content = String::new();
+    let mut events = Vec::new();
+    let mut iter = parser.into_iter();
 
-    // parse AST -> for link
-    let event_iterator = parser.map(|event| {
-        if let Event::Start(Tag::Link {
-            link_type,
-            dest_url,
-            title,
-            id,
-        }) = event
-        {
-            let new_url = resolver(&dest_url);
-            Event::Start(Tag::Link {
+    while let Some(event) = iter.next() {
+        match event {
+            Event::Start(Tag::Image {
                 link_type,
-                dest_url: new_url.into(),
+                dest_url,
                 title,
                 id,
-            })
-        } else {
-            event
-        }
-    });
+            }) => {
+                let new_url = resolver(&dest_url);
+                let lower_url = dest_url.to_lowercase();
 
-    html::push_html(&mut html_content, event_iterator);
+                if lower_url.ends_with(".mp4") || lower_url.ends_with(".mov") {
+                    // Extract alt text from subsequent events
+                    let mut alt = String::new();
+                    while let Some(next_event) = iter.next() {
+                        match next_event {
+                            Event::End(TagEnd::Image) => break,
+                            Event::Text(t) => alt.push_str(&t),
+                            _ => {}
+                        }
+                    }
+                    events.push(Event::Html(
+                        format!(
+                            r#"<video controls aria-label="{}"><source src="{}" type="video/mp4">Your browser does not support the video tag.</video>"#,
+                            alt, new_url
+                        )
+                        .into(),
+                    ));
+                } else if lower_url.ends_with(".mp3")
+                    || lower_url.ends_with(".wav")
+                    || lower_url.ends_with(".ogg")
+                {
+                    // Extract alt text
+                    let mut alt = String::new();
+                    while let Some(next_event) = iter.next() {
+                        match next_event {
+                            Event::End(TagEnd::Image) => break,
+                            Event::Text(t) => alt.push_str(&t),
+                            _ => {}
+                        }
+                    }
+                    events.push(Event::Html(
+                        format!(
+                            r#"<audio controls aria-label="{}"><source src="{}" type="audio/mpeg">Your browser does not support the audio tag.</audio>"#,
+                            alt, new_url
+                        )
+                        .into(),
+                    ));
+                } else {
+                    events.push(Event::Start(Tag::Image {
+                        link_type,
+                        dest_url: new_url.into(),
+                        title,
+                        id,
+                    }));
+                }
+            }
+            Event::Start(Tag::Link {
+                link_type,
+                dest_url,
+                title,
+                id,
+            }) => {
+                let new_url = resolver(&dest_url);
+                events.push(Event::Start(Tag::Link {
+                    link_type,
+                    dest_url: new_url.into(),
+                    title,
+                    id,
+                }));
+            }
+            _ => events.push(event),
+        }
+    }
+
+    html::push_html(&mut html_content, events.into_iter());
 
     Ok(html_content)
 }

@@ -2,6 +2,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use reqwest::Client;
 
+pub mod cache;
 pub mod sync;
 
 pub use crate::services::sync::sync::SyncService;

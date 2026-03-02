@@ -1,6 +1,6 @@
-use crate::database::PageRepository;
 use crate::database::sqlite::SqliteRepository;
-use crate::domain::Page;
+use crate::features::pages::model::Page;
+use crate::features::pages::repo::PageRepository;
 use chrono::NaiveDateTime;
 use sqlx::sqlite::SqlitePoolOptions;
 
@@ -36,7 +36,7 @@ fn create_mock_page(identifier: &str, filename: &str) -> Page {
         name: Some("Test".to_string()),
         html_content: "<p>Hello</p>".to_string(),
         md_content: "# Hello".to_string(),
-        md_content_hash: "hash".to_string(),
+        content_hash: "hash".to_string(),
         tags: vec!["rust".to_string()],
         modified_datetime: NaiveDateTime::parse_from_str(
             "2023-01-01 12:00:00",
@@ -45,6 +45,9 @@ fn create_mock_page(identifier: &str, filename: &str) -> Page {
         .ok(),
         created_datetime: NaiveDateTime::parse_from_str("2023-01-01 12:00:00", "%Y-%m-%d %H:%M:%S")
             .ok(),
+        file_path: std::path::PathBuf::from(format!("/content/{}", filename)),
+        new_path: None,
+        mime_type: "text/html".to_string(),
     }
 }
 

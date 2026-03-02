@@ -1,6 +1,6 @@
-use crate::domain::Page;
-use crate::features::pages::model::{DbPage, JsonPage};
+use crate::features::pages::model::{DbPage, JsonPage, Page};
 use chrono::NaiveDateTime;
+use std::path::PathBuf;
 
 // create a page for the purposes of testing
 fn create_test_page() -> Page {
@@ -10,7 +10,7 @@ fn create_test_page() -> Page {
         name: Some("Test Page".to_string()),
         html_content: "<h1>Hello</h1>".to_string(),
         md_content: "# Hello".to_string(),
-        md_content_hash: "hash123".to_string(),
+        content_hash: "hash123".to_string(),
         tags: vec!["rust".to_string(), "api".to_string()],
         modified_datetime: NaiveDateTime::parse_from_str(
             "2023-01-01 12:00:00",
@@ -19,6 +19,9 @@ fn create_test_page() -> Page {
         .ok(),
         created_datetime: NaiveDateTime::parse_from_str("2023-01-01 10:00:00", "%Y-%m-%d %H:%M:%S")
             .ok(),
+        file_path: PathBuf::from("/content/test.md"),
+        new_path: None,
+        mime_type: "text/html".to_string(),
     }
 }
 
@@ -36,6 +39,7 @@ fn test_page_to_db_page_serialization() {
     assert_eq!(db_page.identifier, "test-slug");
     // verify tags became a JSON string (necessary for storing in sqlite)
     assert_eq!(db_page.tags, Some(r#"["rust","api"]"#.to_string()));
+    assert_eq!(db_page.content_hash, "hash123");
 }
 
 // test the system's ability to convert DbPage -> Page and JSON vectorization
@@ -48,10 +52,13 @@ fn test_db_page_to_page_deserialization() {
         name: None,
         html_content: "".to_string(),
         md_content: "".to_string(),
-        md_content_hash: "".to_string(),
+        content_hash: "".to_string(),
         tags: Some(r#"["tag1","tag2"]"#.to_string()),
         modified_datetime: None,
         created_datetime: None,
+        file_path: "/content/db.md".to_string(),
+        new_path: None,
+        mime_type: "text/html".to_string(),
     };
 
     // convert it into a page
@@ -75,6 +82,7 @@ fn test_page_to_json_page_formatting() {
     );
     // verify tags are a native vector for the API
     assert_eq!(json_page.tags, vec!["rust".to_string(), "api".to_string()]);
+    assert_eq!(json_page.content_hash, "hash123");
 }
 
 // to be honest i don't know why this is here
@@ -100,10 +108,13 @@ fn test_malformed_db_tags_fails() {
         name: None,
         html_content: "".to_string(),
         md_content: "".to_string(),
-        md_content_hash: "".to_string(),
+        content_hash: "".to_string(),
         tags: Some("not-json".to_string()), // Malformed JSON
         modified_datetime: None,
         created_datetime: None,
+        file_path: "/content/bad.md".to_string(),
+        new_path: None,
+        mime_type: "text/html".to_string(),
     };
 
     let result: Result<Page, _> = db_page.try_into();

@@ -5,8 +5,15 @@ pub struct ChasquiConfig {
     pub database_url: String,
     pub max_connections: u32,
     pub frontend_path: PathBuf,
-    pub content_dir: PathBuf,
-    pub strip_extensions: bool,
+    
+    // Mount Points
+    pub pages_dir: PathBuf,
+    pub images_dir: PathBuf,
+    pub audio_dir: PathBuf,
+    pub videos_dir: PathBuf,
+
+    pub page_strip_extension: bool,
+    pub asset_strip_extension: bool,
     pub serve_home: bool,
     pub home_identifier: String,
     pub webhook_url: String,
@@ -28,12 +35,19 @@ impl ChasquiConfig {
                 .expect("Failed to determine FRONTEND_DIST_PATH from environment variables"),
         );
 
-        let content_dir = std::fs::canonicalize(
-            std::env::var("CONTENT_DIR").unwrap_or_else(|_| "./content/md".to_string()),
-        )
-        .expect("Failed to resolve CONTENT_DIR to an absolute path. Does the directory exist?");
+        // Content Dir remains as a root, but we default mount points under it
+        let content_root = std::env::var("CONTENT_DIR").unwrap_or_else(|_| "./content".to_string());
+        
+        let pages_dir = resolve_dir("PAGES_DIR", &format!("{}/md", content_root));
+        let images_dir = resolve_dir("IMAGES_DIR", &format!("{}/images", content_root));
+        let audio_dir = resolve_dir("AUDIO_DIR", &format!("{}/audio", content_root));
+        let videos_dir = resolve_dir("VIDEOS_DIR", &format!("{}/videos", content_root));
 
-        let strip_extensions = std::env::var("DEFAULT_IDENTIFIER_STRIP_EXTENSION")
+        let page_strip_extension = std::env::var("DEFAULT_PAGE_IDENTIFIER_STRIP_EXTENSION")
+            .unwrap_or_else(|_| "true".to_string())
+            == "true";
+
+        let asset_strip_extension = std::env::var("DEFAULT_ASSET_IDENTIFIER_STRIP_EXTENSION")
             .unwrap_or_else(|_| "false".to_string())
             == "true";
 
@@ -53,12 +67,22 @@ impl ChasquiConfig {
             database_url,
             max_connections,
             frontend_path,
-            content_dir,
-            strip_extensions,
+            pages_dir,
+            images_dir,
+            audio_dir,
+            videos_dir,
+            page_strip_extension,
+            asset_strip_extension,
             serve_home,
             home_identifier,
             webhook_url,
             webhook_secret,
         }
     }
+}
+
+fn resolve_dir(env_var: &str, default: &str) -> PathBuf {
+    let path_str = std::env::var(env_var).unwrap_or_else(|_| default.to_string());
+    std::fs::canonicalize(&path_str)
+        .unwrap_or_else(|_| PathBuf::from(path_str)) // Fallback if folder doesn't exist yet
 }

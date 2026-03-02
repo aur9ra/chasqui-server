@@ -1,3 +1,4 @@
+// TODO: sunset this file
 use crate::config::ChasquiConfig;
 use std::collections::HashMap;
 
@@ -44,7 +45,12 @@ impl Manifest {
     // this function will give the AST parser links that will navigate to the identifier and catch
     // errors
     // this function will also ignore any external links or mailtos
-    pub fn resolve_link(&self, link: &str, current_filename: &str, config: &ChasquiConfig) -> String {
+    pub fn resolve_link(
+        &self,
+        link: &str,
+        current_filename: &str,
+        config: &ChasquiConfig,
+    ) -> String {
         // filter external and anchor-only links
         if link.starts_with("http://")
             || link.starts_with("https://")
@@ -70,14 +76,14 @@ impl Manifest {
         };
 
         // attempt to lookup the link by filename & identifier
-        let resolved_identifier = if let Some(identifier) = self.filename_to_identifier.get(&lookup_key)
-        {
-            Some(identifier.clone())
-        } else if self.identifier_to_filename.contains_key(&lookup_key) {
-            Some(lookup_key.to_string())
-        } else {
-            None
-        };
+        let resolved_identifier =
+            if let Some(identifier) = self.filename_to_identifier.get(&lookup_key) {
+                Some(identifier.clone())
+            } else if self.identifier_to_filename.contains_key(&lookup_key) {
+                Some(lookup_key.to_string())
+            } else {
+                None
+            };
         // return the "fixed" link that will navigate to the page the writer intended, or the
         // original if broken
         match resolved_identifier {

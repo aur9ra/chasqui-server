@@ -7,12 +7,11 @@ use dotenv;
 use sqlx::Sqlite;
 use sqlx::migrate::MigrateDatabase;
 use sqlx::sqlite::SqlitePoolOptions;
+use std::path::PathBuf;
 use std::sync::Arc;
-use tower_http::services::ServeDir;
 
 pub mod config;
 pub mod database;
-pub mod domain;
 mod features;
 pub mod io;
 pub mod parser;
@@ -71,9 +70,9 @@ async fn main() -> anyhow::Result<()> {
     let repository = SqliteRepository::new(pool.clone());
 
     // initialize content reader
-    let reader = io::local::LocalContentReader {
-        root_path: config.content_dir.clone(),
-    };
+    let reader = Arc::new(io::local::LocalContentReader {
+        root_path: PathBuf::from("/"), // Rootless reader, relies on config canonicalization
+    });
 
     // initialize notifier
     let notifier = services::WebhookBuildNotifier::new(
@@ -82,10 +81,10 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // sync_service holds an in-memory hashmap of our database.
-    // reading from this (rather, asking it for stuff) is much quicker than reading from sqlx.
+    // reading from this (rather, asking it for stuff) is much quicker than reading from db.
     let sync_service = SyncService::new(
         Box::new(repository),
-        Box::new(reader),
+        reader,
         Box::new(notifier),
         shared_config.clone(),
     )
@@ -104,24 +103,28 @@ async fn main() -> anyhow::Result<()> {
         .await
         .expect("Failed to run database migrations.");
 
-    // initial sync of content directory for pages
-    if let Err(e) = shared_sync_service.full_sync().await {
-        eprintln!("Error during initial sync: {}", e);
-    }
+    // diagnostic logs
+    println!(
+        "Main: Serving static files from: {:?}",
+        config.frontend_path
+    );
 
-    // start background file watcher
+    // start background file watchers
     start_directory_watcher(shared_sync_service.clone(), shared_config.clone());
 
     println!("Starting server...");
 
     // start router setup
-
-    // api router, where features are composed
-    let api_router = Router::new().nest("/pages", features::pages::pages_router());
+    let api_router = Router::new()
+        .nest("/pages", features::pages::pages_router())
+        .route(
+            "/metadata/{*identifier}",
+            axum::routing::get(features::handlers::metadata_handler),
+        );
 
     let app = Router::new()
         .nest("/api", api_router)
-        .fallback_service(ServeDir::new(config.frontend_path).append_index_html_on_directories(true))
+        .fallback(features::handlers::universal_dispatch_handler)
         .with_state(app_state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;

@@ -5,8 +5,11 @@ CREATE TABLE IF NOT EXISTS pages (
     name                TEXT,
     html_content        TEXT NOT NULL,
     md_content          TEXT NOT NULL,
-    md_content_hash     TEXT NOT NULL,
+    content_hash        TEXT NOT NULL,
     tags                TEXT,
     modified_datetime   INTEGER,
-    created_datetime    INTEGER
+    created_datetime    INTEGER,
+    file_path           TEXT NOT NULL,
+    new_path            TEXT,
+    mime_type           TEXT NOT NULL
 );

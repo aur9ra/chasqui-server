@@ -1,44 +1,47 @@
 pub mod model;
 pub mod repo;
+pub mod service;
 
 use crate::AppState;
+use crate::features::model::FeatureType;
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::State,
     http::StatusCode,
     routing::get,
 };
 
 pub fn pages_router() -> Router<AppState> {
     Router::new()
-        .route("/{slug}", get(get_page_handler))
         .route("/", get(list_pages_handler))
-}
-
-async fn get_page_handler(
-    State(state): State<AppState>,
-    Path(slug): Path<String>,
-) -> Result<Json<model::JsonPage>, StatusCode> {
-    // Strip any trailing slashes from the incoming slug
-    let identifier = slug.trim_end_matches('/');
-
-    let page_option: Option<crate::domain::Page> = state.sync_service.get_page_by_identifier(identifier).await;
-
-    match page_option {
-        None => Err(StatusCode::NOT_FOUND),
-        Some(page) => {
-            let json_page: model::JsonPage = (&page).into();
-            Ok(Json(json_page))
-        }
-    }
+        .route("/{*identifier}", get(get_page_handler))
 }
 
 async fn list_pages_handler(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<model::JsonPage>>, StatusCode> {
-    let db_pages = state.sync_service.get_all_pages().await;
+    let features = state.sync_service.get_all_features_by_type(FeatureType::Page).await;
 
-    let json_pages: Vec<model::JsonPage> = db_pages.iter().map(|p| p.into()).collect();
+    let json_pages: Vec<model::JsonPage> = features.into_iter().filter_map(|f| {
+        if let crate::features::model::Feature::Page(p) = f {
+            Some(model::JsonPage::from(&p))
+        } else {
+            None
+        }
+    }).collect();
 
     Ok(Json(json_pages))
+}
+
+async fn get_page_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(identifier): axum::extract::Path<String>,
+) -> Result<Json<model::JsonPage>, StatusCode> {
+    // Note: The universal router handles path sanitization usually, 
+    // but here we just look it up.
+    if let Some(crate::features::model::Feature::Page(p)) = state.sync_service.get_feature_by_identifier(&identifier).await {
+        Ok(Json(model::JsonPage::from(&p)))
+    } else {
+        Err(StatusCode::NOT_FOUND)
+    }
 }

@@ -1,9 +1,26 @@
-use crate::domain::Page;
 use anyhow::{Context, Result};
 use chrono::NaiveDateTime;
 use derive_more::derive::Display;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Page {
+    pub identifier: String,
+    pub filename: String,
+    pub name: Option<String>,
+    pub html_content: String,
+    pub md_content: String,
+    pub content_hash: String,
+    pub tags: Vec<String>,
+    pub modified_datetime: Option<NaiveDateTime>,
+    pub created_datetime: Option<NaiveDateTime>,
+    pub file_path: PathBuf,
+    pub new_path: Option<PathBuf>,
+    pub mime_type: String,
+}
+
+// TODO: look into not needing to redefine a struct for the Db and Json!
 #[derive(sqlx::FromRow, Eq, PartialEq, Clone, Display)]
 #[display("{}", filename)]
 pub struct DbPage {
@@ -12,10 +29,13 @@ pub struct DbPage {
     pub name: Option<String>,
     pub html_content: String,
     pub md_content: String,
-    pub md_content_hash: String,
+    pub content_hash: String,
     pub tags: Option<String>,
     pub modified_datetime: Option<NaiveDateTime>,
     pub created_datetime: Option<NaiveDateTime>,
+    pub file_path: String,
+    pub new_path: Option<String>,
+    pub mime_type: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -25,21 +45,10 @@ pub struct JsonPage {
     pub name: Option<String>,
     pub html_content: String,
     pub md_content: String,
-    pub md_content_hash: String,
+    pub content_hash: String,
     pub tags: Vec<String>,
     pub modified_datetime: Option<String>,
     pub created_datetime: Option<String>,
-}
-
-pub struct PageDraft {
-    pub filename: String,
-    pub identifier: String,
-    pub name: Option<String>,
-    pub content_body: String,
-    pub md_content_hash: String,
-    pub tags: Vec<String>,
-    pub modified_datetime: Option<NaiveDateTime>,
-    pub created_datetime: Option<NaiveDateTime>,
 }
 
 impl TryFrom<DbPage> for Page {
@@ -61,10 +70,13 @@ impl TryFrom<DbPage> for Page {
             name: db_page.name,
             html_content: db_page.html_content,
             md_content: db_page.md_content,
-            md_content_hash: db_page.md_content_hash,
+            content_hash: db_page.content_hash,
             tags: parsed_tags,
             modified_datetime: db_page.modified_datetime,
             created_datetime: db_page.created_datetime,
+            file_path: PathBuf::from(db_page.file_path),
+            new_path: db_page.new_path.map(PathBuf::from),
+            mime_type: db_page.mime_type,
         })
     }
 }
@@ -83,10 +95,13 @@ impl From<&Page> for DbPage {
             name: page.name.clone(),
             html_content: page.html_content.clone(),
             md_content: page.md_content.clone(),
-            md_content_hash: page.md_content_hash.clone(),
+            content_hash: page.content_hash.clone(),
             tags: tags_str,
             modified_datetime: page.modified_datetime,
             created_datetime: page.created_datetime,
+            file_path: page.file_path.to_string_lossy().to_string(),
+            new_path: page.new_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+            mime_type: page.mime_type.clone(),
         }
     }
 }
@@ -107,7 +122,7 @@ impl From<&Page> for JsonPage {
             name: page.name.clone(),
             html_content: page.html_content.clone(),
             md_content: page.md_content.clone(),
-            md_content_hash: page.md_content_hash.clone(),
+            content_hash: page.content_hash.clone(),
             tags: page.tags.clone(),
             modified_datetime,
             created_datetime,

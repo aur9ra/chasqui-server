@@ -3,7 +3,7 @@ use tower::ServiceExt;
 use crate::AppState;
 use crate::features::pages::pages_router;
 use crate::services::sync::SyncService;
-use crate::tests::integration_pages_sync_service::{MockRepository, MockContentReader, MockBuildNotifier};
+use crate::tests::mocks::{MockRepository, MockContentReader, MockBuildNotifier};
 use crate::config::ChasquiConfig;
 use std::sync::Arc;
 use std::path::PathBuf;
@@ -20,8 +20,12 @@ async fn setup_stress_state(page_count: usize) -> AppState {
         database_url: "".into(),
         max_connections: 1,
         frontend_path: "".into(),
-        content_dir: PathBuf::from("/content"),
-        strip_extensions: false,
+        pages_dir: PathBuf::from("/content"),
+        images_dir: PathBuf::from("/content"),
+        audio_dir: PathBuf::from("/content"),
+        videos_dir: PathBuf::from("/content"),
+        page_strip_extension: false,
+        asset_strip_extension: false,
         serve_home: true,
         home_identifier: "index".into(),
         webhook_url: "".into(),
@@ -35,12 +39,13 @@ async fn setup_stress_state(page_count: usize) -> AppState {
         reader.add_file(&path, &content);
     }
 
-    let service = SyncService::new(
-        Box::new(repo), 
-        Box::new(reader.clone()), 
-        Box::new(notifier), 
-        config.clone()
-    ).await.unwrap();
+        let service = SyncService::new(
+            Box::new(repo),
+            Arc::new(reader.clone()),
+            Box::new(notifier),
+            config.clone(),
+        )
+    .await.unwrap();
 
     // ingest them all into memory
     service.full_sync().await.unwrap();
@@ -89,12 +94,17 @@ async fn test_api_hammer_random_access() {
                 .await
                 .unwrap();
             
-            assert_eq!(response.status(), 200);
+            let status = response.status();
+            if status != 200 {
+                panic!("Hammer failed with status {}. URI: {}", status, uri);
+            }
         });
     }
 
     // wait for the "hammering" to finish
-    while let Some(_) = set.join_next().await {}
+    while let Some(res) = set.join_next().await {
+        res.expect("Worker task panicked during hammer test");
+    }
     
     let duration = start.elapsed();
     println!("\nNUCLEAR RANDOM ACCESS TEST RESULT:");
