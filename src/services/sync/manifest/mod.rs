@@ -26,6 +26,17 @@ impl Manifest {
         }
     }
 
+    /// Returns a deep copy of the current manifest state.
+    pub fn snapshot(&self) -> Self {
+        Self {
+            filenames: self.filenames.clone(),
+            file_to_id: self.file_to_id.clone(),
+            id_to_file: self.id_to_file.clone(),
+            hashes: self.hashes.clone(),
+            feature_types: self.feature_types.clone(),
+        }
+    }
+
     /// Atomically registers a file and its metadata.
     pub fn register_claim(&mut self, claim: ManifestClaim) {
         self.filenames.insert(claim.filename.clone());

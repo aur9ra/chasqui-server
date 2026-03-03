@@ -7,7 +7,7 @@ use crate::database::SyncRepository;
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -256,6 +256,71 @@ impl ContentReader for MockContentReader {
     }
 
     async fn list_files_by_extension(&self, _root: &Path, _extension: String) {}
+}
+
+// --- Mock: BlockingReader ---
+#[derive(Clone)]
+pub struct BlockingReader {
+    pub inner: MockContentReader,
+    pub block_on: Arc<Mutex<HashSet<String>>>,
+    pub blocked_files: Arc<Mutex<HashSet<String>>>,
+    pub barrier: Arc<tokio::sync::Barrier>,
+}
+
+impl BlockingReader {
+    pub fn new(inner: MockContentReader, barrier: Arc<tokio::sync::Barrier>) -> Self {
+        Self {
+            inner,
+            block_on: Arc::new(Mutex::new(HashSet::new())),
+            blocked_files: Arc::new(Mutex::new(HashSet::new())),
+            barrier,
+        }
+    }
+
+    pub fn block_at(&self, filename: &str) {
+        let mut block = self.block_on.lock().unwrap();
+        block.insert(filename.to_string());
+    }
+}
+
+#[async_trait]
+impl ContentReader for BlockingReader {
+    async fn read_to_string(&self, path: &Path) -> Result<String> {
+        let path_str = path.to_string_lossy();
+        let should_block = {
+            let block = self.block_on.lock().unwrap();
+            let mut blocked = self.blocked_files.lock().unwrap();
+            
+            let match_found = block.iter().any(|b| path_str.contains(b));
+            if match_found && !blocked.contains(&path_str.to_string()) {
+                blocked.insert(path_str.to_string());
+                true
+            } else {
+                false
+            }
+        };
+
+        if should_block {
+            println!("BlockingReader: [WAIT] Task for {:?} is waiting at barrier...", path_str);
+            self.barrier.wait().await;
+            println!("BlockingReader: [GO] Task for {:?} released from barrier!", path_str);
+        }
+
+        self.inner.read_to_string(path).await
+    }
+
+    async fn read_bytes(&self, path: &Path) -> Result<Vec<u8>> {
+        // We do NOT block on read_bytes because it is called during Manifest::register_claims
+        // while holding a WRITE lock. Blocking here would deadlock other sync tasks.
+        self.inner.read_bytes(path).await
+    }
+
+    async fn open_file(&self, path: &Path) -> Result<SyncFile> { self.inner.open_file(path).await }
+    async fn get_hash(&self, path: &Path) -> Result<String> { self.inner.get_hash(path).await }
+    async fn get_metadata(&self, path: &Path) -> Result<ContentMetadata> { self.inner.get_metadata(path).await }
+    async fn list_all_files(&self, root: &Path) -> Result<Vec<PathBuf>> { self.inner.list_all_files(root).await }
+    async fn list_files_by_extension(&self, root: &Path, ext: String) { self.inner.list_files_by_extension(root, ext).await }
+    async fn list_markdown_files(&self, root: &Path) -> Result<Vec<PathBuf>> { self.inner.list_markdown_files(root).await }
 }
 
 // --- Mock: ContentBuildNotifier ---

@@ -173,16 +173,18 @@ impl SyncService {
         }
 
         // 2. Pass 1: Identity Consensus (Discovery & Validation)
-        let valid_claims = {
+        let (valid_claims, manifest_snapshot) = {
             let mut manifest_guard = self.manifest.write().await;
-            manifest_guard
+            let claims = manifest_guard
                 .register_claims(changes, &*self.reader, &self.config)
-                .await
+                .await;
+            // Snapshot current state for Pass 2 (Production)
+            (claims, manifest_guard.snapshot())
         };
 
         // 3. Pass 2 & 3: Production & Persistence
         for claim in valid_claims {
-            match self.factory.get_feature_from_file(claim.clone()).await {
+            match self.factory.get_feature_from_file_with_manifest(claim.clone(), &manifest_snapshot).await {
                 Ok(feature) => {
                     if let Err(e) = self.repo.save_feature(feature.clone()).await {
                         eprintln!("Sync Service: Failed to save feature to repository: {}. Rolling back manifest claim.", e);

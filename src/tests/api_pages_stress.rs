@@ -1,15 +1,16 @@
-use axum::{body::Body, http::Request};
-use tower::ServiceExt;
 use crate::AppState;
+use crate::config::ChasquiConfig;
 use crate::features::pages::pages_router;
 use crate::services::sync::SyncService;
-use crate::tests::mocks::{MockRepository, MockContentReader, MockBuildNotifier};
-use crate::config::ChasquiConfig;
-use std::sync::Arc;
-use std::path::PathBuf;
-use tokio::task::JoinSet;
-use std::time::Instant;
+use crate::tests::mocks::{MockBuildNotifier, MockContentReader, MockRepository};
+use axum::{body::Body, http::Request, Router, http::StatusCode};
 use rand::Rng;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Instant, Duration};
+use tokio::task::JoinSet;
+use tokio::time::{timeout};
+use tower::ServiceExt;
 
 // helper to flood the system with N unique pages for stress testing
 async fn setup_stress_state(page_count: usize) -> AppState {
@@ -39,13 +40,14 @@ async fn setup_stress_state(page_count: usize) -> AppState {
         reader.add_file(&path, &content);
     }
 
-        let service = SyncService::new(
-            Box::new(repo),
-            Arc::new(reader.clone()),
-            Box::new(notifier),
-            config.clone(),
-        )
-    .await.unwrap();
+    let service = SyncService::new(
+        Box::new(repo),
+        Arc::new(reader.clone()),
+        Box::new(notifier),
+        config.clone(),
+    )
+    .await
+    .unwrap();
 
     // ingest them all into memory
     service.full_sync().await.unwrap();
@@ -63,11 +65,11 @@ async fn setup_stress_state(page_count: usize) -> AppState {
 async fn test_api_hammer_random_access() {
     let page_count = 1000;
     let request_count = 10000;
-    
+
     let state = setup_stress_state(page_count).await;
     // we use an Arc for the app so all 10,000 tasks can point to the same router
     let app = Arc::new(pages_router().with_state(state));
-    
+
     let mut set = JoinSet::new();
     let start = Instant::now();
 
@@ -85,15 +87,10 @@ async fn test_api_hammer_random_access() {
             // clone the router (cheap pointer clone) and send the request
             let local_app = app_clone.as_ref().clone();
             let response = local_app
-                .oneshot(
-                    Request::builder()
-                        .uri(&uri)
-                        .body(Body::empty())
-                        .unwrap(),
-                )
+                .oneshot(Request::builder().uri(&uri).body(Body::empty()).unwrap())
                 .await
                 .unwrap();
-            
+
             let status = response.status();
             if status != 200 {
                 panic!("Hammer failed with status {}. URI: {}", status, uri);
@@ -105,10 +102,72 @@ async fn test_api_hammer_random_access() {
     while let Some(res) = set.join_next().await {
         res.expect("Worker task panicked during hammer test");
     }
-    
+
     let duration = start.elapsed();
     println!("\nNUCLEAR RANDOM ACCESS TEST RESULT:");
     println!("Pages in system: {}", page_count);
     println!("Served {} random requests in {:?}", request_count, duration);
-    println!("Requests per second: {:.2}", request_count as f64 / duration.as_secs_f64());
+    println!(
+        "Requests per second: {:.2}",
+        request_count as f64 / duration.as_secs_f64()
+    );
+}
+
+#[tokio::test]
+async fn test_api_responsive_during_sync() {
+    let page_count = 100;
+    let request_count = 50;
+
+    let state = setup_stress_state(page_count).await;
+    let service = state.sync_service.clone();
+    
+    // Create a router that we'll hit while sync is happening
+    let app = Router::new()
+        .nest("/pages", pages_router())
+        .with_state(state.clone());
+
+    // 1. Trigger a "Slow Sync" in the background
+    // We'll use a task that repeatedly calls full_sync
+    // To make it slow, we can't easily inject latency into the existing service's reader
+    // without re-creating it, so we'll just rely on the fact that full_sync
+    // acquires write locks on the manifest and caches.
+    let service_clone = service.clone();
+    let sync_handle = tokio::spawn(async move {
+        for _ in 0..5 {
+            let _ = service_clone.full_sync().await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    });
+
+    // 2. Hammer the API while the sync is churning
+    let mut set = JoinSet::new();
+    let start = Instant::now();
+
+    for i in 0..request_count {
+        let app_clone = app.clone();
+        set.spawn(async move {
+            let uri = format!("/pages/post-{}", i % page_count);
+            let response = app_clone
+                .oneshot(Request::builder().uri(&uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::OK);
+        });
+    }
+
+    // 3. Ensure all requests finish within a reasonable "responsive" time
+    // Even with sync churning, these should not be blocked for seconds.
+    let timeout_duration = Duration::from_secs(2);
+    let result = timeout(timeout_duration, async {
+        while let Some(res) = set.join_next().await {
+            res.unwrap();
+        }
+    }).await;
+
+    assert!(result.is_ok(), "API requests timed out during sync - indicates heavy contention or deadlock");
+    sync_handle.await.unwrap();
+    
+    let duration = start.elapsed();
+    println!("Responsive-during-sync: {} requests in {:?}", request_count, duration);
 }

@@ -78,12 +78,61 @@ impl FeatureFactory {
 
     /// Orchestrates the production of a full Feature from a validated ManifestClaim.
     pub async fn get_feature_from_file(&self, claim: ManifestClaim) -> Result<Feature> {
+        let manifest_snapshot = { self.manifest.read().await.snapshot() };
+        self.get_feature_from_file_with_manifest(claim, &manifest_snapshot).await
+    }
+
+    pub async fn get_feature_from_file_with_manifest(&self, claim: ManifestClaim, manifest: &Manifest) -> Result<Feature> {
         match claim.feature_type {
-            FeatureType::Page => Ok(Feature::Page(self.build_page(claim).await?)),
-            FeatureType::Video => Ok(Feature::Video(self.build_video(claim).await?)),
-            FeatureType::Audio => Ok(Feature::Audio(self.build_audio(claim).await?)),
-            FeatureType::Image => Ok(Feature::Image(self.build_image(claim).await?)),
+            FeatureType::Page => Ok(Feature::Page(self.build_page_with_manifest(claim, manifest).await?)),
+            FeatureType::Video => Ok(Feature::Video(self.build_video_with_manifest(claim, manifest).await?)),
+            FeatureType::Audio => Ok(Feature::Audio(self.build_audio_with_manifest(claim, manifest).await?)),
+            FeatureType::Image => Ok(Feature::Image(self.build_image_with_manifest(claim, manifest).await?)),
         }
+    }
+
+    async fn build_page_with_manifest(&self, claim: ManifestClaim, manifest: &Manifest) -> Result<Page> {
+        let full_path = claim.mount_path.join(&claim.filename);
+        Page::new_from_file(
+            &full_path,
+            &self.config,
+            &*self.reader,
+            manifest,
+        )
+        .await
+    }
+
+    async fn build_video_with_manifest(&self, claim: ManifestClaim, manifest: &Manifest) -> Result<VideoAsset> {
+        let full_path = claim.mount_path.join(&claim.filename);
+        VideoAsset::new_from_file(
+            &full_path,
+            &self.config,
+            &*self.reader,
+            manifest,
+        )
+        .await
+    }
+
+    async fn build_audio_with_manifest(&self, claim: ManifestClaim, manifest: &Manifest) -> Result<AudioAsset> {
+        let full_path = claim.mount_path.join(&claim.filename);
+        AudioAsset::new_from_file(
+            &full_path,
+            &self.config,
+            &*self.reader,
+            manifest,
+        )
+        .await
+    }
+
+    async fn build_image_with_manifest(&self, claim: ManifestClaim, manifest: &Manifest) -> Result<ImageAsset> {
+        let full_path = claim.mount_path.join(&claim.filename);
+        ImageAsset::new_from_file(
+            &full_path,
+            &self.config,
+            &*self.reader,
+            manifest,
+        )
+        .await
     }
 
     async fn build_page(&self, claim: ManifestClaim) -> Result<Page> {
