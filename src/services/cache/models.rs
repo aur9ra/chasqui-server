@@ -17,27 +17,67 @@ pub trait AsFeature: Sized {
 }
 
 impl AsFeature for Page {
-    fn from_feature(f: Feature) -> Option<Self> { if let Feature::Page(p) = f { Some(p) } else { None } }
-    fn into_feature(&self) -> Feature { Feature::Page(self.clone()) }
-    fn get_filename(&self) -> &str { &self.filename }
+    fn from_feature(f: Feature) -> Option<Self> {
+        if let Feature::Page(p) = f {
+            Some(p)
+        } else {
+            None
+        }
+    }
+    fn into_feature(&self) -> Feature {
+        Feature::Page(self.clone())
+    }
+    fn get_filename(&self) -> &str {
+        &self.filename
+    }
 }
 
 impl AsFeature for ImageAsset {
-    fn from_feature(f: Feature) -> Option<Self> { if let Feature::Image(img) = f { Some(img) } else { None } }
-    fn into_feature(&self) -> Feature { Feature::Image(self.clone()) }
-    fn get_filename(&self) -> &str { &self.metadata.filename }
+    fn from_feature(f: Feature) -> Option<Self> {
+        if let Feature::Image(img) = f {
+            Some(img)
+        } else {
+            None
+        }
+    }
+    fn into_feature(&self) -> Feature {
+        Feature::Image(self.clone())
+    }
+    fn get_filename(&self) -> &str {
+        &self.metadata.filename
+    }
 }
 
 impl AsFeature for AudioAsset {
-    fn from_feature(f: Feature) -> Option<Self> { if let Feature::Audio(aud) = f { Some(aud) } else { None } }
-    fn into_feature(&self) -> Feature { Feature::Audio(self.clone()) }
-    fn get_filename(&self) -> &str { &self.metadata.filename }
+    fn from_feature(f: Feature) -> Option<Self> {
+        if let Feature::Audio(aud) = f {
+            Some(aud)
+        } else {
+            None
+        }
+    }
+    fn into_feature(&self) -> Feature {
+        Feature::Audio(self.clone())
+    }
+    fn get_filename(&self) -> &str {
+        &self.metadata.filename
+    }
 }
 
 impl AsFeature for VideoAsset {
-    fn from_feature(f: Feature) -> Option<Self> { if let Feature::Video(vid) = f { Some(vid) } else { None } }
-    fn into_feature(&self) -> Feature { Feature::Video(self.clone()) }
-    fn get_filename(&self) -> &str { &self.metadata.filename }
+    fn from_feature(f: Feature) -> Option<Self> {
+        if let Feature::Video(vid) = f {
+            Some(vid)
+        } else {
+            None
+        }
+    }
+    fn into_feature(&self) -> Feature {
+        Feature::Video(self.clone())
+    }
+    fn get_filename(&self) -> &str {
+        &self.metadata.filename
+    }
 }
 
 /// A simple, thread-safe in-memory store for a specific feature type.
@@ -59,7 +99,10 @@ impl<F> InMemoryCache<F> {
 impl<F: AsFeature + Send + Sync + Clone> SyncableCache for InMemoryCache<F> {
     async fn add(&self, feature: Feature) -> Result<()> {
         if let Some(item) = F::from_feature(feature) {
-            self.storage.write().await.insert(item.get_filename().to_string(), item);
+            self.storage
+                .write()
+                .await
+                .insert(item.get_filename().to_string(), item);
         }
         Ok(())
     }
