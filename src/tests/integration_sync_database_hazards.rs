@@ -258,5 +258,5 @@ async fn test_sync_handles_db_lock_during_update_gracefully() {
 
     // verify they're all there
     let all_pages = service.get_all_features_by_type(FeatureType::Page).await;
-    assert_eq!(all_pages.len(), 16);
+    assert_eq!(all_pages.len(), 26);
 }
