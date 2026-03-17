@@ -35,7 +35,6 @@ impl ContentBuildNotifier for WebhookBuildNotifier {
         let res = self
             .client
             .post(&self.url)
-            .header("Authorization", format!("Bearer {}", self.secret))
             .send()
             .await;
 

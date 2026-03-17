@@ -112,6 +112,13 @@ async fn main() -> anyhow::Result<()> {
     // start background file watchers
     start_directory_watcher(shared_sync_service.clone(), shared_config.clone());
 
+    // trigger initial build notification on startup
+    // if the frontend is still booting up, it's fine
+    match shared_sync_service.notify_build().await {
+        Ok(_) => println!("Main: Initial build notification sent successfully."),
+        Err(e) => eprintln!("Main: Initial build notification failed (this is expected if frontend is still booting): {}", e),
+    }
+
     println!("Starting server...");
 
     // start router setup

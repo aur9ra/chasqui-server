@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  chasqui-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - ARCH=${ARCH:-armv7-unknown-linux-musleabihf}
+    container_name: chasqui-backend
+    restart: unless-stopped
+    networks:
+      - chasqui_network
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./db:/db
+      - ./content:/content
+      - chasqui_dist:/dist # Shared volume for Astro output
+    environment:
+      - DATABASE_URL=sqlite:/db/dev.db
+      - FRONTEND_DIST_PATH=/dist
+      - PAGES_DIR=/content/md
+      - IMAGES_DIR=/content/images
+      - AUDIO_DIR=/content/audio
+      - VIDEOS_DIR=/content/videos
+      - FRONTEND_WEBHOOK_URL=http://chasqui-frontend:4000/build
+      - ROUTER_SERVE_HOME_AT_DEFAULT=true
+      - HOME_IDENTIFIER=index
+
+networks:
+  chasqui_network:
+    external: true
+
+volumes:
+  chasqui_dist:
+    external: true

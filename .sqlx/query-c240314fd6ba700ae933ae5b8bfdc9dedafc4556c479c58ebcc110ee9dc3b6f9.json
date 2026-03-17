@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM video_assets WHERE filename = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "c240314fd6ba700ae933ae5b8bfdc9dedafc4556c479c58ebcc110ee9dc3b6f9"
+}

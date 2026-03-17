@@ -1,0 +1,92 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT \n                id as \"id: Uuid\", \n                filename, \n                identifier, \n                file_path, \n                content_hash, \n                new_path, \n                bytes_size, \n                mime_type, \n                created_at, \n                modified_at, \n                width, \n                height, \n                alt_text \n            FROM image_assets\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id: Uuid",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "filename",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "identifier",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "file_path",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "content_hash",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "new_path",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "bytes_size",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "mime_type",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 8,
+        "type_info": "Datetime"
+      },
+      {
+        "name": "modified_at",
+        "ordinal": 9,
+        "type_info": "Datetime"
+      },
+      {
+        "name": "width",
+        "ordinal": 10,
+        "type_info": "Integer"
+      },
+      {
+        "name": "height",
+        "ordinal": 11,
+        "type_info": "Integer"
+      },
+      {
+        "name": "alt_text",
+        "ordinal": 12,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "85178354c64032e9291ec486e5703410189b67a00436036cb17953ccd655097d"
+}

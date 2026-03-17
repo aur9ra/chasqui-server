@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM pages WHERE filename = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "263a76c33b0d9a8ac377b90e529fb30506e51308445994b5d767f8423a949e40"
+}
