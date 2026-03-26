@@ -1,7 +1,7 @@
 services:
   chasqui-server:
     # automatically pull the correct image for user architecture (x86, ARM64, or ARMv7)
-    image: ghcr.io/${GITHUB_USER:-aur9ra}/chasqui-server:latest
+    image: ghcr.io/${GITHUB_USER:-aur9ra}/chasqui-server:${IMAGE_TAG:-latest}
     container_name: chasqui-backend
     restart: unless-stopped
     networks:

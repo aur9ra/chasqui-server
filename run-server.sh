@@ -3,8 +3,8 @@
 # stop the script if any command fails
 set -e
 
-# replace with your GitHub username
 GITHUB_USER=${GITHUB_USER:-aur9ra}
+IMAGE_TAG=${IMAGE_TAG:-latest}
 COMPOSE_FILE="docker-compose.deploy.yml"
 
 # ensure required docker infrastructure exists
