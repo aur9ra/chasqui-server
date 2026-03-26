@@ -1,0 +1,34 @@
+services:
+  chasqui-server:
+    # automatically pull the correct image for user architecture (x86, ARM64, or ARMv7)
+    image: ghcr.io/${GITHUB_USER:-aur9ra}/chasqui-server:latest
+    container_name: chasqui-backend
+    restart: unless-stopped
+    networks:
+      - chasqui_network
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=sqlite:/db/dev.db
+      - FRONTEND_DIST_PATH=/dist
+      - PAGES_DIR=/content/md
+      - IMAGES_DIR=/content/images
+      - AUDIO_DIR=/content/audio
+      - VIDEOS_DIR=/content/videos
+      - FRONTEND_WEBHOOK_URL=http://chasqui-frontend:4000/build
+      - ROUTER_SERVE_HOME_AT_DEFAULT=true
+      - HOME_IDENTIFIER=index
+    volumes:
+      - ./db:/db
+      - ./content:/content
+      - chasqui_dist:/dist # shared volume for Astro output
+
+networks:
+  chasqui_network:
+    name: chasqui_network
+    external: true # assumes a separate manager or the frontend created the network
+
+volumes:
+  chasqui_dist:
+    name: chasqui_dist
+    external: true # assumes a separate manager or the frontend created the volume
