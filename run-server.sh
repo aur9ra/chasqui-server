@@ -29,11 +29,27 @@ echo "stopping existing server (if any)..."
 export GITHUB_USER=$GITHUB_USER
 docker compose -f "$COMPOSE_FILE" down --remove-orphans
 
-echo "pulling latest image for $GITHUB_USER..."
-docker compose -f "$COMPOSE_FILE" pull
+# detect architecture to force correct image pull.
+ARCH=$(uname -m)
+if [ "$ARCH" = "x86_64" ]; then
+  PLATFORM="linux/amd64"
+elif [ "$ARCH" = "aarch64" ]; then
+  PLATFORM="linux/arm64"
+elif [ "$ARCH" = "armv7l" ]; then
+  PLATFORM="linux/arm/v7"
+else PLATFORM="linux/amd64"; fi # fallback
+
+IMAGE_NAME="ghcr.io/$GITHUB_USER/chasqui-server:latest"
+echo "pulling latest image ($PLATFORM) for $GITHUB_USER..."
+docker pull --platform "$PLATFORM" "$IMAGE_NAME"
 
 echo "starting backend container..."
 docker compose -f "$COMPOSE_FILE" up -d
+
+# fix volume permissions. the frontend (root) creates files the backend (1001) serves.
+# we run a tiny temporary container to align ownership in the shared volume.
+echo "aligning volume permissions..."
+docker run --rm -v chasqui_dist:/dist alpine chown -R 1001:1001 /dist
 
 echo "Chasqui Server is up."
 echo "API & File Server listening on port 3000..."
