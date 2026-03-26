@@ -4,7 +4,7 @@ Chasqui is a lightweight, extensible CMS backend.
 
 It is built to be exceptionally powerful yet easy to run on virtually any hardware capable of spinning up a Docker container. Chasqui is being developed with the specific goal of running on a Raspberry Pi.
 
-Note: This is the companion to the [Chasqui Frontend](https://github.com/aur9ra/chasqui-frontend). The frontend includes a webhook listener to enable real-time, static-site rebuilds whenever your content changes.
+**Note**: This is the companion to the [Chasqui Frontend](https://github.com/aur9ra/chasqui-frontend). The frontend includes a webhook listener to enable real-time, static-site rebuilds whenever your content changes.
 
 **Note:** This project is very early in development.
 
