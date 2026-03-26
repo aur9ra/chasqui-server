@@ -15,6 +15,12 @@ docker network inspect chasqui_network >/dev/null 2>&1 ||
 docker volume inspect chasqui_dist >/dev/null 2>&1 ||
   (echo "creating volume: chasqui_dist" && docker volume create chasqui_dist)
 
+# ensure the database directory exists and has correct permissions for the non-root container user
+# we use UID 1001 to match the 'USER 1001' instruction in the Dockerfile.
+mkdir -p db
+sudo chown -R 1001:1001 db
+sudo chmod -R 775 db
+
 echo "pulling latest image for $GITHUB_USER..."
 export GITHUB_USER=$GITHUB_USER
 docker compose -f "$COMPOSE_FILE" pull
