@@ -18,7 +18,7 @@ docker volume inspect chasqui_dist >/dev/null 2>&1 ||
 # ensure the database and content directories exist and have correct permissions.
 # we use UID 1001 to match the 'USER 1001' instruction in the Dockerfile.
 # we set 777 on content so the host user can edit files freely without needing sudo.
-mkdir -p db
+mkdir -p db content
 sudo chown -R 1001:1001 db
 sudo chmod -R 775 db
 sudo chmod -R 777 content
