@@ -1,6 +1,6 @@
 # Chasqui
 
-Chasqui is a lightweight, modular CMS and server. This repository contains the Backend component, built with Rust.
+Chasqui is a lightweight, modular CMS and server. This repository contains the **Backend** component, built with Rust.
 
 It is built to be exceptionally powerful yet easy to run on virtually any hardware capable of spinning up a Docker container. Chasqui is being developed with the specific goal of running on a Raspberry Pi.
 
