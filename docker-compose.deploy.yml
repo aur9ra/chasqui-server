@@ -5,7 +5,10 @@ services:
     container_name: chasqui-backend
     restart: unless-stopped
     networks:
-      - chasqui_network
+      chasqui_network:
+        aliases:
+          - chasqui-server
+          - chasqui-backend
     ports:
       - "3000:3000"
     environment:

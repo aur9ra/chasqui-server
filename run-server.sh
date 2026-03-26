@@ -21,8 +21,13 @@ mkdir -p db
 sudo chown -R 1001:1001 db
 sudo chmod -R 775 db
 
-echo "pulling latest image for $GITHUB_USER..."
+# stop existing server if it is running to prevent name or port conflicts.
+# we use 'down' instead of 'stop' to ensure a clean state for the new pull.
+echo "stopping existing server (if any)..."
 export GITHUB_USER=$GITHUB_USER
+docker compose -f "$COMPOSE_FILE" down --remove-orphans
+
+echo "pulling latest image for $GITHUB_USER..."
 docker compose -f "$COMPOSE_FILE" pull
 
 echo "starting backend container..."
