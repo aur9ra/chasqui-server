@@ -1,6 +1,4 @@
 target/
-!target/x86_64-unknown-linux-musl/release/chasqui-server
-!target/armv7-unknown-linux-musleabihf/release/chasqui-server
 
 **/*.db
 **/*.db-journal
@@ -9,5 +7,3 @@ target/
 .git/
 content/
 testing_ground/
-docker-compose.yml
-Dockerfile
