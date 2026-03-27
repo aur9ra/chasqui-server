@@ -39,8 +39,8 @@ elif [ "$ARCH" = "armv7l" ]; then
   PLATFORM="linux/arm/v7"
 else PLATFORM="linux/amd64"; fi # fallback
 
-IMAGE_NAME="ghcr.io/$GITHUB_USER/chasqui-server:latest"
-echo "pulling latest image ($PLATFORM) for $GITHUB_USER..."
+IMAGE_NAME="ghcr.io/$GITHUB_USER/chasqui-server:$IMAGE_TAG"
+echo "pulling image ($PLATFORM) for $GITHUB_USER..."
 docker pull --platform "$PLATFORM" "$IMAGE_NAME"
 
 echo "starting backend container..."

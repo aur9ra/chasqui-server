@@ -30,6 +30,8 @@ pub struct AppState {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // determine environment variables
+    // load .env.default first, then .env for local overrides
+    dotenv::from_filename(".env.default").ok();
     dotenv::dotenv().ok();
 
     // load centralized config

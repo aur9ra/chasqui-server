@@ -8,3 +8,4 @@ db/
 GEMINI.md
 test_files/
 testing_ground/
+.aider*
