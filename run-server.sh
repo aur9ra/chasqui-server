@@ -1,6 +1,8 @@
 #!/bin/bash
 
-# stop the script if any command fails
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/.env" 2>/dev/null || true
+
 set -e
 
 GITHUB_USER=${GITHUB_USER:-aur9ra}
