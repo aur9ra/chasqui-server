@@ -16,12 +16,12 @@ docker volume inspect chasqui_dist >/dev/null 2>&1 ||
   (echo "creating volume: chasqui_dist" && docker volume create chasqui_dist)
 
 # ensure the database and content directories exist and have correct permissions.
-# we use UID 1001 to match the 'USER 1001' instruction in the Dockerfile.
-# we set 777 on content so the host user can edit files freely without needing sudo.
+# we use a Docker container (which runs as root) to set ownership to UID 1001,
+# matching the 'USER 1001' instruction in the Dockerfile.
+# we set 777 on content so the host user can edit files freely.
 mkdir -p db content
-sudo chown -R 1001:1001 db
-sudo chmod -R 775 db
-sudo chmod -R 777 content
+docker run --rm -v "$(pwd)/db:/db" alpine sh -c "chown -R 1001:1001 /db && chmod -R 775 /db"
+docker run --rm -v "$(pwd)/content:/content" alpine sh -c "chmod -R 777 /content"
 
 # create .env if missing
 if [ ! -f .env ]; then
