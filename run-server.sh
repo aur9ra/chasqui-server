@@ -23,6 +23,12 @@ sudo chown -R 1001:1001 db
 sudo chmod -R 775 db
 sudo chmod -R 777 content
 
+# create .env if missing
+if [ ! -f .env ]; then
+  echo "creating empty .env"
+  touch .env
+fi
+
 # stop existing server if it is running to prevent name or port conflicts.
 # we use 'down' instead of 'stop' to ensure a clean state for the new pull.
 echo "stopping existing server (if any)..."
