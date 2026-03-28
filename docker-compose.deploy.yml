@@ -4,20 +4,20 @@ services:
     image: ghcr.io/${GITHUB_USER:-aur9ra}/chasqui-server:${IMAGE_TAG:-latest}
     container_name: chasqui-server
     restart: unless-stopped
+    environment:
+      - DOCKER_RUNTIME=true
     networks:
-      chasqui_network:
-        aliases:
-          - chasqui-server
-          - chasqui-server
+    - chasqui_network
     ports:
-      - "3003:3000"
+      - "${HOST_PORT:-3003}:${PORT:-3003}"
     volumes:
-      - ./db:/db
-      - ./content:/content
+      - ${DB_HOST_PATH:-./db}:/db
+      - ${CONTENT_HOST_PATH:-./content}:/content
       - chasqui_dist:/dist
     env_file:
-      - .env.containers.default
       - .env.default
+      - .env.containers.default
+      - .env
 
 networks:
   chasqui_network:

@@ -4,9 +4,9 @@ use crate::services::sync::SyncService;
 use crate::watcher::watcher::start_directory_watcher;
 use axum::Router;
 use dotenv;
-use sqlx::Sqlite;
 use sqlx::migrate::MigrateDatabase;
 use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::Sqlite;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -29,8 +29,18 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // load .env first for local overrides, then .env.default for fallbacks
+    // load user specified environment variables first
+    // load container specified environment variables if the server is running in a container
+    // load general default environment variables
     dotenv::dotenv().ok();
+
+    let docker_runtime = std::env::var("DOCKER_RUNTIME")
+        .unwrap_or_default() == "true";
+
+    if docker_runtime {
+        dotenv::from_filename(".env.containers.default").ok();
+    }
+
     dotenv::from_filename(".env.default").ok();
 
     // load centralized config
@@ -138,10 +148,11 @@ async fn main() -> anyhow::Result<()> {
         .fallback(features::handlers::universal_dispatch_handler)
         .with_state(app_state);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
-    println!("Server listening on http://0.0.0.0:3000");
+let addr = format!("0.0.0.0:{}", config.port);
+let listener = tokio::net::TcpListener::bind(&addr).await?;
+println!("Server listening on http://{}", addr);
 
-    axum::serve(listener, app).await?;
+axum::serve(listener, app).await?;
 
     Ok(())
 }

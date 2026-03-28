@@ -1,7 +1,22 @@
 #!/bin/bash
 
+# we have three environments that we will load from.
+# first, .env.default
+# then, .env.containers.default
+# then, .env
+# fields specified in .env take precedence over those in .env.containers.default and .env.default, for example.
+#
+# these must be set to be part of the environment with "set -a" before we run the docker compose files.
+# this is because these environment variables dictate many key aspects of the docker containers, such as the locations of the
+# static site output, content, port, etc.
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+set -a
+source "$SCRIPT_DIR/.env.default" 2>/dev/null || true
+source "$SCRIPT_DIR/.env.containers.default" 2>/dev/null || true
 source "$SCRIPT_DIR/.env" 2>/dev/null || true
+set +a
 
 set -e
 
@@ -34,10 +49,9 @@ fi
 # stop existing server if it is running to prevent name or port conflicts.
 # we use 'down' instead of 'stop' to ensure a clean state for the new pull.
 echo "stopping existing server (if any)..."
-export GITHUB_USER=$GITHUB_USER
 docker compose -f "$COMPOSE_FILE" down --remove-orphans
 
-# detect architecture to force correct image pull.
+# detect architecture to force correct image pull
 ARCH=$(uname -m)
 if [ "$ARCH" = "x86_64" ]; then
   PLATFORM="linux/amd64"
@@ -60,5 +74,5 @@ echo "aligning volume permissions..."
 docker run --rm -v chasqui_dist:/dist alpine chown -R 1001:1001 /dist
 
 echo "Chasqui Server is up."
-echo "API & File Server listening on port 3000..."
+echo "API & File Server is up..."
 echo "Watching directories in ./content for changes..."

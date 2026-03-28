@@ -1,11 +1,11 @@
 use crate::config::ChasquiConfig;
 use crate::database::SyncRepository;
-use crate::features::model::{Feature, FeatureFactory, FeatureType, match_feature_to_type};
+use crate::features::model::{match_feature_to_type, Feature, FeatureFactory, FeatureType};
 use crate::io::ContentReader;
-use crate::services::ContentBuildNotifier;
-use crate::services::cache::SyncableCache;
 use crate::services::cache::models::InMemoryCache;
+use crate::services::cache::SyncableCache;
 use crate::services::sync::manifest::Manifest;
+use crate::services::ContentBuildNotifier;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
@@ -167,24 +167,29 @@ impl SyncService {
         changes: Vec<(std::path::PathBuf, std::path::PathBuf, FeatureType)>,
         deletions: Vec<std::path::PathBuf>,
     ) -> Result<()> {
-        // 1. Purge Deletions
+        // purge file deletions from database
         for path in deletions {
             self.handle_deletion(&path).await?;
         }
 
-        // 2. Pass 1: Identity Consensus (Discovery & Validation)
+        // generate and validate a new manifest snapshot and a list of valid file update claims to process
         let (valid_claims, manifest_snapshot) = {
             let mut manifest_guard = self.manifest.write().await;
             let claims = manifest_guard
                 .register_claims(changes, &*self.reader, &self.config)
                 .await;
-            // Snapshot current state for Pass 2 (Production)
+
+            // snapshot manifest state
             (claims, manifest_guard.snapshot())
         };
 
-        // 3. Pass 2 & 3: Production & Persistence
+        // create features from file claims
         for claim in valid_claims {
-            match self.factory.get_feature_from_file_with_manifest(claim.clone(), &manifest_snapshot).await {
+            match self
+                .factory
+                .get_feature_from_file_with_manifest(claim.clone(), &manifest_snapshot)
+                .await
+            {
                 Ok(feature) => {
                     if let Err(e) = self.repo.save_feature(feature.clone()).await {
                         eprintln!("Sync Service: Failed to save feature to repository: {}. Rolling back manifest claim.", e);

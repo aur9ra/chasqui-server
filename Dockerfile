@@ -77,6 +77,6 @@ COPY --from=builder /app/chasqui-server /chasqui-server
 # run the application as a non-root user
 USER 1001
 
-EXPOSE 3000
+EXPOSE 3003
 
 ENTRYPOINT ["/chasqui-server"]

@@ -5,7 +5,7 @@ pub struct ChasquiConfig {
     pub database_url: String,
     pub max_connections: u32,
     pub frontend_path: PathBuf,
-    
+
     // Mount Points
     pub pages_dir: PathBuf,
     pub images_dir: PathBuf,
@@ -18,10 +18,12 @@ pub struct ChasquiConfig {
     pub home_identifier: String,
     pub webhook_url: String,
     pub webhook_secret: String,
+    pub port: u16,
 }
 
 impl ChasquiConfig {
     pub fn from_env() -> Self {
+        // Add the relevant functionality to provide fields such as PORT, etc.
         let database_url = std::env::var("DATABASE_URL")
             .expect("Failed to determine DATABASE_URL from environment variables");
 
@@ -37,7 +39,7 @@ impl ChasquiConfig {
 
         // Content Dir remains as a root, but we default mount points under it
         let content_root = std::env::var("CONTENT_DIR").unwrap_or_else(|_| "./content".to_string());
-        
+
         let pages_dir = resolve_dir("PAGES_DIR", &format!("{}/md", content_root));
         let images_dir = resolve_dir("IMAGES_DIR", &format!("{}/images", content_root));
         let audio_dir = resolve_dir("AUDIO_DIR", &format!("{}/audio", content_root));
@@ -63,6 +65,11 @@ impl ChasquiConfig {
 
         let webhook_secret = std::env::var("WEBHOOK_SECRET").unwrap_or_default();
 
+        let port = std::env::var("PORT")
+            .ok()
+            .and_then(|val| val.parse::<u16>().ok())
+            .unwrap_or(3000);
+
         Self {
             database_url,
             max_connections,
@@ -77,12 +84,13 @@ impl ChasquiConfig {
             home_identifier,
             webhook_url,
             webhook_secret,
+            port,
         }
     }
 }
 
 fn resolve_dir(env_var: &str, default: &str) -> PathBuf {
     let path_str = std::env::var(env_var).unwrap_or_else(|_| default.to_string());
-    std::fs::canonicalize(&path_str)
-        .unwrap_or_else(|_| PathBuf::from(path_str)) // Fallback if folder doesn't exist yet
+    std::fs::canonicalize(&path_str).unwrap_or_else(|_| PathBuf::from(path_str))
+    // Fallback if folder doesn't exist yet
 }
