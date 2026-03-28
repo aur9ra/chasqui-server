@@ -2,13 +2,13 @@ services:
   chasqui-server:
     # automatically pull the correct image for user architecture (x86, ARM64, or ARMv7)
     image: ghcr.io/${GITHUB_USER:-aur9ra}/chasqui-server:${IMAGE_TAG:-latest}
-    container_name: chasqui-backend
+    container_name: chasqui-server
     restart: unless-stopped
     networks:
       chasqui_network:
         aliases:
           - chasqui-server
-          - chasqui-backend
+          - chasqui-server
     ports:
       - "3003:3000"
     volumes:
