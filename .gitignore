@@ -5,7 +5,8 @@ tar.sh
 .env
 buildlog.txt
 db/
-GEMINI.md
+
 test_files/
 testing_ground/
-.aider*
+
+LLM.md
