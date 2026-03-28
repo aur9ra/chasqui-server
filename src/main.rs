@@ -29,10 +29,9 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // determine environment variables
-    // load .env.default first, then .env for local overrides
-    dotenv::from_filename(".env.default").ok();
+    // load .env first for local overrides, then .env.default for fallbacks
     dotenv::dotenv().ok();
+    dotenv::from_filename(".env.default").ok();
 
     // load centralized config
     let config = ChasquiConfig::from_env();
