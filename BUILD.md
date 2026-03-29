@@ -23,15 +23,14 @@ If you have Rust installed and want to run the server directly on your machine:
 2. **configure environment**:
    Create a `.env` file based on the following:
 
-   ```env
-   DATABASE_URL=sqlite:db/dev.db
-   FRONTEND_DIST_PATH=../chasqui-frontend/dist
-   PAGES_DIR=./content/md
-   IMAGES_DIR=./content/images
-   AUDIO_DIR=./content/audio
-   VIDEOS_DIR=./content/videos
-   FRONTEND_WEBHOOK_URL=http://127.0.0.1:4000/build
-   ```
+```env
+    DATABASE_URL=sqlite:db/dev.db
+    PAGES_DIR=./content/md
+    IMAGES_DIR=./content/images
+    AUDIO_DIR=./content/audio
+    VIDEOS_DIR=./content/videos
+    FRONTEND_WEBHOOK_URL=http://127.0.0.1:4000/build
+    ```
 
 3. **run database migrations**:
 

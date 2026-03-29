@@ -11,7 +11,6 @@ pub fn mock_config(temp_path: PathBuf) -> Arc<ChasquiConfig> {
     Arc::new(ChasquiConfig {
         database_url: "".into(),
         max_connections: 1,
-        frontend_path: "".into(),
         pages_dir: temp_path.join("md"),
         images_dir: temp_path.join("images"),
         audio_dir: temp_path.join("audio"),
@@ -22,6 +21,7 @@ pub fn mock_config(temp_path: PathBuf) -> Arc<ChasquiConfig> {
         home_identifier: "index".into(),
         webhook_url: "http://localhost/build".into(),
         webhook_secret: "secret".into(),
+        port: 3000,
     })
 }
 

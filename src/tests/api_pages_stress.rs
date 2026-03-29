@@ -20,7 +20,6 @@ async fn setup_stress_state(page_count: usize) -> AppState {
     let config = Arc::new(ChasquiConfig {
         database_url: "".into(),
         max_connections: 1,
-        frontend_path: "".into(),
         pages_dir: PathBuf::from("/content"),
         images_dir: PathBuf::from("/content"),
         audio_dir: PathBuf::from("/content"),
@@ -31,6 +30,7 @@ async fn setup_stress_state(page_count: usize) -> AppState {
         home_identifier: "index".into(),
         webhook_url: "".into(),
         webhook_secret: "".into(),
+        port: 3000,
     });
 
     // generate a bunch of fake blog posts

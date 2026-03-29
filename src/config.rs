@@ -4,7 +4,6 @@ use std::path::PathBuf;
 pub struct ChasquiConfig {
     pub database_url: String,
     pub max_connections: u32,
-    pub frontend_path: PathBuf,
 
     // Mount Points
     pub pages_dir: PathBuf,
@@ -31,11 +30,6 @@ impl ChasquiConfig {
             .ok()
             .and_then(|val| val.parse::<u32>().ok())
             .unwrap_or(15);
-
-        let frontend_path = PathBuf::from(
-            std::env::var("FRONTEND_DIST_PATH")
-                .expect("Failed to determine FRONTEND_DIST_PATH from environment variables"),
-        );
 
         // Content Dir remains as a root, but we default mount points under it
         let content_root = std::env::var("CONTENT_DIR").unwrap_or_else(|_| "./content".to_string());
@@ -73,7 +67,6 @@ impl ChasquiConfig {
         Self {
             database_url,
             max_connections,
-            frontend_path,
             pages_dir,
             images_dir,
             audio_dir,

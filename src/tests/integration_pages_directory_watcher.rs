@@ -44,7 +44,6 @@ pub async fn setup_service_with_options(opts: TestOptions) -> (
     let config = Arc::new(ChasquiConfig {
         database_url: "".into(),
         max_connections: 1,
-        frontend_path: "".into(),
         pages_dir: opts.pages_dir,
         images_dir: opts.images_dir,
         audio_dir: opts.audio_dir,
@@ -55,6 +54,7 @@ pub async fn setup_service_with_options(opts: TestOptions) -> (
         home_identifier: "index".into(),
         webhook_url: "".into(),
         webhook_secret: "".into(),
+        port: 3000,
     });
 
     let service = SyncService::new(

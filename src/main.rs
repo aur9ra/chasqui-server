@@ -114,12 +114,6 @@ async fn main() -> anyhow::Result<()> {
         .await
         .expect("Failed to run database migrations.");
 
-    // diagnostic logs
-    println!(
-        "Main: Serving static files from: {:?}",
-        config.frontend_path
-    );
-
     // start background file watchers
     start_directory_watcher(shared_sync_service.clone(), shared_config.clone());
 
@@ -145,7 +139,6 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .nest("/api", api_router)
-        .fallback(features::handlers::universal_dispatch_handler)
         .with_state(app_state);
 
 let addr = format!("0.0.0.0:{}", config.port);

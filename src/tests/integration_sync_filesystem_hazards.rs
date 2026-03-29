@@ -43,7 +43,6 @@ async fn test_sync_handles_circular_and_dead_symlinks() {
     let config = Arc::new(ChasquiConfig {
         database_url: "".into(),
         max_connections: 1,
-        frontend_path: "".into(),
         pages_dir: md_dir.clone(),
         images_dir: content_dir.join("images"),
         audio_dir: content_dir.join("audio"),
@@ -54,6 +53,7 @@ async fn test_sync_handles_circular_and_dead_symlinks() {
         home_identifier: "index".into(),
         webhook_url: "".into(),
         webhook_secret: "".into(),
+        port: 3000,
     });
 
     let reader = Arc::new(LocalContentReader {
