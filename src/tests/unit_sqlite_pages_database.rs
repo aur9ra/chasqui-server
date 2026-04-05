@@ -1,6 +1,5 @@
 use crate::database::sqlite::SqliteRepository;
 use crate::features::pages::model::Page;
-use crate::features::pages::repo::PageRepository;
 use chrono::NaiveDateTime;
 use sqlx::sqlite::SqlitePoolOptions;
 
