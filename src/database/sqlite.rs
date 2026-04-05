@@ -2,6 +2,7 @@ use crate::features::model::{Feature, FeatureType};
 use anyhow::Result;
 use sqlx::{Pool, Sqlite};
 
+#[derive(Clone)]
 pub struct SqliteRepository {
     pub pool: Pool<Sqlite>,
 }
