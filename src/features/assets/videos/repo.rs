@@ -2,18 +2,9 @@ use crate::database::sqlite::SqliteRepository;
 use crate::features::assets::model::CommonAssetMetadata;
 use crate::features::assets::videos::model::VideoAsset;
 use anyhow::{Context, Result};
-use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use std::path::PathBuf;
 use uuid::Uuid;
-
-#[async_trait]
-pub trait VideoRepository: Send + Sync {
-    async fn get_video_by_filename(&self, filename: &str) -> Result<Option<VideoAsset>>;
-    async fn get_all_videos(&self) -> Result<Vec<VideoAsset>>;
-    async fn save_video(&self, video: &VideoAsset) -> Result<()>;
-    async fn delete_video(&self, filename: &str) -> Result<()>;
-}
 
 #[derive(sqlx::FromRow)]
 struct DbVideo {
@@ -62,9 +53,8 @@ impl TryFrom<DbVideo> for VideoAsset {
     }
 }
 
-#[async_trait]
-impl VideoRepository for SqliteRepository {
-    async fn get_video_by_filename(&self, filename: &str) -> Result<Option<VideoAsset>> {
+impl SqliteRepository {
+    pub async fn get_video_by_filename(&self, filename: &str) -> Result<Option<VideoAsset>> {
         let row = sqlx::query_as!(
             DbVideo,
             r#"
@@ -99,7 +89,7 @@ impl VideoRepository for SqliteRepository {
         }
     }
 
-    async fn get_all_videos(&self) -> Result<Vec<VideoAsset>> {
+    pub async fn get_all_videos(&self) -> Result<Vec<VideoAsset>> {
         let rows = sqlx::query_as!(
             DbVideo,
             r#"
@@ -133,7 +123,7 @@ impl VideoRepository for SqliteRepository {
         Ok(video_list)
     }
 
-    async fn save_video(&self, video: &VideoAsset) -> Result<()> {
+    pub async fn save_video(&self, video: &VideoAsset) -> Result<()> {
         let meta = &video.metadata;
         let file_path = meta.file_path.to_string_lossy().to_string();
         let new_path = meta
@@ -193,7 +183,7 @@ impl VideoRepository for SqliteRepository {
         Ok(())
     }
 
-    async fn delete_video(&self, filename: &str) -> Result<()> {
+    pub async fn delete_video(&self, filename: &str) -> Result<()> {
         sqlx::query!("DELETE FROM video_assets WHERE filename = ?", filename)
             .execute(&self.pool)
             .await

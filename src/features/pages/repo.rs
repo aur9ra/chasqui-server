@@ -1,35 +1,15 @@
 use crate::database::sqlite::SqliteRepository;
 use crate::features::pages::model::{DbPage, Page};
 use anyhow::{Context, Result};
-use async_trait::async_trait;
 
-// a pagerepository can be shared between threads (referencable)
-// sqlx::Pool is thread safe
-// generic implementation of page operations, db specific implementations in "sqlite.rs", future:
-// "postgresql.rs", "mysql.rs"
-#[async_trait]
-pub trait PageRepository: Send + Sync {
-    async fn get_page_by_identifier(&self, id: &str) -> Result<Option<Page>>;
-    async fn get_page_by_filename(&self, filename: &str) -> Result<Option<Page>>;
-    async fn get_all_pages(&self) -> Result<Vec<Page>>;
-
-    // write operations
-    async fn save_page(&self, page: &Page) -> Result<()>;
-    async fn delete_page(&self, filename: &str) -> Result<()>;
-}
-
-// TODO: split this into /repos/sqlite.rs, /repos/postgresql, etc?
-#[async_trait]
-impl PageRepository for SqliteRepository {
-    async fn get_page_by_identifier(&self, id: &str) -> Result<Option<Page>> {
-        // query the database for the DbPage
+impl SqliteRepository {
+    pub async fn get_page_by_identifier(&self, id: &str) -> Result<Option<Page>> {
         let db_page_opt =
             sqlx::query_as::<_, DbPage>("SELECT * FROM pages WHERE identifier LIKE ?")
                 .bind(id)
                 .fetch_optional(&self.pool)
                 .await?;
 
-        // translate to pure Page model
         match db_page_opt {
             Some(db_page) => {
                 let page: Page = db_page.try_into()?;
@@ -39,7 +19,7 @@ impl PageRepository for SqliteRepository {
         }
     }
 
-    async fn get_page_by_filename(&self, filename: &str) -> Result<Option<Page>> {
+    pub async fn get_page_by_filename(&self, filename: &str) -> Result<Option<Page>> {
         let db_page_opt = sqlx::query_as::<_, DbPage>("SELECT * FROM pages WHERE filename = ?")
             .bind(filename)
             .fetch_optional(&self.pool)
@@ -54,7 +34,7 @@ impl PageRepository for SqliteRepository {
         }
     }
 
-    async fn get_all_pages(&self) -> Result<Vec<Page>> {
+    pub async fn get_all_pages(&self) -> Result<Vec<Page>> {
         let db_pages = sqlx::query_as::<_, DbPage>("SELECT * FROM pages")
             .fetch_all(&self.pool)
             .await?;
@@ -68,12 +48,9 @@ impl PageRepository for SqliteRepository {
         Ok(pages)
     }
 
-    async fn save_page(&self, page: &Page) -> Result<()> {
-        // translate the pure Page down into a DbPage for SQLite
+    pub async fn save_page(&self, page: &Page) -> Result<()> {
         let db_page: DbPage = page.into();
 
-        // nifty UPSERT
-        // it's important to have the db do the insert/update
         sqlx::query!(
             r#"
             INSERT INTO pages (
@@ -115,7 +92,7 @@ impl PageRepository for SqliteRepository {
         Ok(())
     }
 
-    async fn delete_page(&self, filename: &str) -> Result<()> {
+    pub async fn delete_page(&self, filename: &str) -> Result<()> {
         sqlx::query!("DELETE FROM pages WHERE filename = ?", filename)
             .execute(&self.pool)
             .await

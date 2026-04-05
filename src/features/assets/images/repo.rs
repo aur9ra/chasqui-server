@@ -2,18 +2,9 @@ use crate::database::sqlite::SqliteRepository;
 use crate::features::assets::images::model::ImageAsset;
 use crate::features::assets::model::CommonAssetMetadata;
 use anyhow::{Context, Result};
-use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use std::path::PathBuf;
 use uuid::Uuid;
-
-#[async_trait]
-pub trait ImageRepository: Send + Sync {
-    async fn get_image_by_filename(&self, filename: &str) -> Result<Option<ImageAsset>>;
-    async fn get_all_images(&self) -> Result<Vec<ImageAsset>>;
-    async fn save_image(&self, image: &ImageAsset) -> Result<()>;
-    async fn delete_image(&self, filename: &str) -> Result<()>;
-}
 
 #[derive(sqlx::FromRow)]
 struct DbImage {
@@ -56,9 +47,8 @@ impl TryFrom<DbImage> for ImageAsset {
     }
 }
 
-#[async_trait]
-impl ImageRepository for SqliteRepository {
-    async fn get_image_by_filename(&self, filename: &str) -> Result<Option<ImageAsset>> {
+impl SqliteRepository {
+    pub async fn get_image_by_filename(&self, filename: &str) -> Result<Option<ImageAsset>> {
         let row = sqlx::query_as!(
             DbImage,
             r#"
@@ -90,7 +80,7 @@ impl ImageRepository for SqliteRepository {
         }
     }
 
-    async fn get_all_images(&self) -> Result<Vec<ImageAsset>> {
+    pub async fn get_all_images(&self) -> Result<Vec<ImageAsset>> {
         let rows = sqlx::query_as!(
             DbImage,
             r#"
@@ -121,7 +111,7 @@ impl ImageRepository for SqliteRepository {
         Ok(images)
     }
 
-    async fn save_image(&self, image: &ImageAsset) -> Result<()> {
+    pub async fn save_image(&self, image: &ImageAsset) -> Result<()> {
         let meta = &image.metadata;
         let file_path = meta.file_path.to_string_lossy().to_string();
         let new_path = meta
@@ -173,7 +163,7 @@ impl ImageRepository for SqliteRepository {
         Ok(())
     }
 
-    async fn delete_image(&self, filename: &str) -> Result<()> {
+    pub async fn delete_image(&self, filename: &str) -> Result<()> {
         sqlx::query!("DELETE FROM image_assets WHERE filename = ?", filename)
             .execute(&self.pool)
             .await

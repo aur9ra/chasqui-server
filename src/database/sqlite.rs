@@ -1,11 +1,5 @@
-use crate::database::SyncRepository;
-use crate::features::assets::audio::repo::AudioRepository;
-use crate::features::assets::images::repo::ImageRepository;
-use crate::features::assets::videos::repo::VideoRepository;
 use crate::features::model::{Feature, FeatureType};
-use crate::features::pages::repo::PageRepository;
 use anyhow::Result;
-use async_trait::async_trait;
 use sqlx::{Pool, Sqlite};
 
 pub struct SqliteRepository {
@@ -16,11 +10,8 @@ impl SqliteRepository {
     pub fn new(pool: Pool<Sqlite>) -> Self {
         Self { pool }
     }
-}
 
-#[async_trait]
-impl SyncRepository for SqliteRepository {
-    async fn save_feature(&self, feature: Feature) -> Result<()> {
+    pub async fn save_feature(&self, feature: Feature) -> Result<()> {
         match feature {
             Feature::Page(page) => self.save_page(&page).await,
             Feature::Image(img) => self.save_image(&img).await,
@@ -29,7 +20,7 @@ impl SyncRepository for SqliteRepository {
         }
     }
 
-    async fn get_feature(&self, filename: &str, feature_type: FeatureType) -> Result<Option<Feature>> {
+    pub async fn get_feature(&self, filename: &str, feature_type: FeatureType) -> Result<Option<Feature>> {
         match feature_type {
             FeatureType::Page => Ok(self.get_page_by_filename(filename).await?.map(Feature::Page)),
             FeatureType::Image => Ok(self.get_image_by_filename(filename).await?.map(Feature::Image)),
@@ -38,11 +29,11 @@ impl SyncRepository for SqliteRepository {
         }
     }
 
-    async fn update_feature(&self, feature: Feature) -> Result<()> {
+    pub async fn update_feature(&self, feature: Feature) -> Result<()> {
         self.save_feature(feature).await
     }
 
-    async fn delete_feature(&self, filename: &str, feature_type: FeatureType) -> Result<()> {
+    pub async fn delete_feature(&self, filename: &str, feature_type: FeatureType) -> Result<()> {
         match feature_type {
             FeatureType::Page => self.delete_page(filename).await,
             FeatureType::Image => self.delete_image(filename).await,
@@ -51,10 +42,10 @@ impl SyncRepository for SqliteRepository {
         }
     }
 
-    async fn get_all_features(&self, feature_type: FeatureType) -> Result<Vec<Feature>> {
+    pub async fn get_all_features(&self, feature_type: FeatureType) -> Result<Vec<Feature>> {
         match feature_type {
             FeatureType::Page => {
-                let pages = <Self as PageRepository>::get_all_pages(self).await?;
+                let pages = self.get_all_pages().await?;
                 Ok(pages.into_iter().map(Feature::Page).collect())
             }
             FeatureType::Image => {

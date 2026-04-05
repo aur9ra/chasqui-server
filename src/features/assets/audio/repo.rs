@@ -2,18 +2,9 @@ use crate::database::sqlite::SqliteRepository;
 use crate::features::assets::audio::model::AudioAsset;
 use crate::features::assets::model::CommonAssetMetadata;
 use anyhow::{Context, Result};
-use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use std::path::PathBuf;
 use uuid::Uuid;
-
-#[async_trait]
-pub trait AudioRepository: Send + Sync {
-    async fn get_audio_by_filename(&self, filename: &str) -> Result<Option<AudioAsset>>;
-    async fn get_all_audio(&self) -> Result<Vec<AudioAsset>>;
-    async fn save_audio(&self, audio: &AudioAsset) -> Result<()>;
-    async fn delete_audio(&self, filename: &str) -> Result<()>;
-}
 
 #[derive(sqlx::FromRow)]
 struct DbAudio {
@@ -60,9 +51,8 @@ impl TryFrom<DbAudio> for AudioAsset {
     }
 }
 
-#[async_trait]
-impl AudioRepository for SqliteRepository {
-    async fn get_audio_by_filename(&self, filename: &str) -> Result<Option<AudioAsset>> {
+impl SqliteRepository {
+    pub async fn get_audio_by_filename(&self, filename: &str) -> Result<Option<AudioAsset>> {
         let row = sqlx::query_as!(
             DbAudio,
             r#"
@@ -96,7 +86,7 @@ impl AudioRepository for SqliteRepository {
         }
     }
 
-    async fn get_all_audio(&self) -> Result<Vec<AudioAsset>> {
+    pub async fn get_all_audio(&self) -> Result<Vec<AudioAsset>> {
         let rows = sqlx::query_as!(
             DbAudio,
             r#"
@@ -129,7 +119,7 @@ impl AudioRepository for SqliteRepository {
         Ok(audio_list)
     }
 
-    async fn save_audio(&self, audio: &AudioAsset) -> Result<()> {
+    pub async fn save_audio(&self, audio: &AudioAsset) -> Result<()> {
         let meta = &audio.metadata;
         let file_path = meta.file_path.to_string_lossy().to_string();
         let new_path = meta
@@ -187,7 +177,7 @@ impl AudioRepository for SqliteRepository {
         Ok(())
     }
 
-    async fn delete_audio(&self, filename: &str) -> Result<()> {
+    pub async fn delete_audio(&self, filename: &str) -> Result<()> {
         sqlx::query!("DELETE FROM audio_assets WHERE filename = ?", filename)
             .execute(&self.pool)
             .await

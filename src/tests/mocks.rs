@@ -1,9 +1,7 @@
 use crate::features::model::{Feature, FeatureType};
 use crate::features::pages::model::Page;
-use crate::features::pages::repo::PageRepository;
 use crate::io::{ContentMetadata, ContentReader, SyncFile, SyncStream};
 use crate::services::ContentBuildNotifier;
-use crate::database::SyncRepository;
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
@@ -371,95 +369,5 @@ impl ContentBuildNotifier for MockBuildNotifier {
 }
 
 // --- Mock: SyncRepository ---
-#[derive(Clone)]
-pub struct MockRepository {
-    pub features: Arc<Mutex<HashMap<String, Feature>>>,
-    pub save_count: Arc<Mutex<usize>>,
-}
-
-impl MockRepository {
-    pub fn new() -> Self {
-        Self {
-            features: Arc::new(Mutex::new(HashMap::new())),
-            save_count: Arc::new(Mutex::new(0)),
-        }
-    }
-}
-
-#[async_trait]
-impl SyncRepository for MockRepository {
-    async fn save_feature(&self, feature: Feature) -> Result<()> {
-        {
-            let mut count = self.save_count.lock().unwrap();
-            *count += 1;
-        }
-        let mut features = self.features.lock().unwrap();
-        let filename = match &feature {
-            Feature::Page(p) => p.filename.clone(),
-            Feature::Image(i) => i.metadata.filename.clone(),
-            Feature::Audio(a) => a.metadata.filename.clone(),
-            Feature::Video(v) => v.metadata.filename.clone(),
-        };
-        features.insert(filename, feature);
-        Ok(())
-    }
-
-    async fn get_feature(&self, filename: &str, _feature_type: FeatureType) -> Result<Option<Feature>> {
-        let features = self.features.lock().unwrap();
-        Ok(features.get(filename).cloned())
-    }
-
-    async fn update_feature(&self, feature: Feature) -> Result<()> {
-        self.save_feature(feature).await
-    }
-
-    async fn delete_feature(&self, filename: &str, _feature_type: FeatureType) -> Result<()> {
-        let mut features = self.features.lock().unwrap();
-        features.remove(filename);
-        Ok(())
-    }
-
-    async fn get_all_features(&self, feature_type: FeatureType) -> Result<Vec<Feature>> {
-        let features = self.features.lock().unwrap();
-        Ok(features.values()
-            .filter(|f| crate::features::model::match_feature_to_type(f) == feature_type)
-            .cloned()
-            .collect())
-    }
-}
-
-#[async_trait]
-impl PageRepository for MockRepository {
-    async fn get_page_by_identifier(&self, id: &str) -> Result<Option<Page>> {
-        let features = self.features.lock().unwrap();
-        Ok(features.values().filter_map(|f| {
-            if let Feature::Page(p) = f {
-                if p.identifier == id { Some(p.clone()) } else { None }
-            } else { None }
-        }).next())
-    }
-
-    async fn get_page_by_filename(&self, filename: &str) -> Result<Option<Page>> {
-        let features = self.features.lock().unwrap();
-        if let Some(Feature::Page(p)) = features.get(filename) {
-            Ok(Some(p.clone()))
-        } else {
-            Ok(None)
-        }
-    }
-
-    async fn get_all_pages(&self) -> Result<Vec<Page>> {
-        let features = self.features.lock().unwrap();
-        Ok(features.values().filter_map(|f| {
-            if let Feature::Page(p) = f { Some(p.clone()) } else { None }
-        }).collect())
-    }
-
-    async fn save_page(&self, page: &Page) -> Result<()> {
-        self.save_feature(Feature::Page(page.clone())).await
-    }
-
-    async fn delete_page(&self, filename: &str) -> Result<()> {
-        self.delete_feature(filename, FeatureType::Page).await
-    }
-}
+// Note: MockRepository trait implementations removed in Phase 1 refactoring.
+// Tests will be updated to use SqliteRepository with in-memory SQLite.
