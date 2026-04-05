@@ -8,14 +8,14 @@ use crate::AppState;
 use crate::features::pages::pages_router;
 use crate::features::handlers::metadata_handler;
 use crate::services::sync::SyncService;
-use crate::tests::mocks::{MockRepository, MockBuildNotifier};
+use crate::tests::mocks::{create_test_repository, MockBuildNotifier};
 use crate::config::ChasquiConfig;
 use std::sync::Arc;
 use std::fs;
 use tempfile::tempdir;
 
 async fn setup_api_test_state() -> (AppState, tempfile::TempDir) {
-    let repo = MockRepository::new();
+    let repo = create_test_repository().await;
     let notifier = MockBuildNotifier::new();
     
     let dir = tempdir().expect("Failed to create temp dir");
@@ -47,7 +47,7 @@ async fn setup_api_test_state() -> (AppState, tempfile::TempDir) {
     });
 
     let service = SyncService::new(
-        Box::new(repo),
+        repo.clone(),
         reader,
         Box::new(notifier),
         config.clone(),

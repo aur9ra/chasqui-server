@@ -1,7 +1,7 @@
 use crate::features::model::Feature;
 use crate::services::sync::SyncService;
 use crate::tests::integration_sync_core::mock_config;
-use crate::tests::mocks::{MockBuildNotifier, MockContentReader, MockRepository};
+use crate::tests::mocks::{create_test_repository, MockBuildNotifier, MockContentReader};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::time::{Duration, timeout};
@@ -9,7 +9,7 @@ use tokio::time::{Duration, timeout};
 #[tokio::test]
 #[ignore]
 async fn test_sync_creates_large_features() {
-    let repo = MockRepository::new();
+    let repo = create_test_repository().await;
     let reader = MockContentReader::new();
     let notifier = MockBuildNotifier::new();
     let content_dir = PathBuf::from("/content");
@@ -25,7 +25,7 @@ async fn test_sync_creates_large_features() {
     // If we hash more than 1MB, this WILL fail.
     let service = timeout(Duration::from_millis(250), async {
         SyncService::new(
-            Box::new(repo.clone()),
+            repo.clone(),
             Arc::new(reader.clone()),
             Box::new(notifier.clone()),
             config.clone(),
@@ -47,7 +47,7 @@ async fn test_sync_creates_large_features() {
 
 #[tokio::test]
 async fn test_sync_renders_large_page() {
-    let repo = MockRepository::new();
+    let repo = create_test_repository().await;
     let reader = MockContentReader::new();
     let notifier = MockBuildNotifier::new();
     let content_dir = PathBuf::from("/content");
@@ -66,7 +66,7 @@ async fn test_sync_renders_large_page() {
     // 2. Sync and Render
     // We expect this to take more than a few milliseconds but well under a second.
     let service = SyncService::new(
-        Box::new(repo.clone()),
+        repo.clone(),
         Arc::new(reader.clone()),
         Box::new(notifier.clone()),
         config.clone(),

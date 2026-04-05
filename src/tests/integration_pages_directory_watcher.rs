@@ -1,9 +1,8 @@
 use crate::config::ChasquiConfig;
+use crate::database::SqliteRepository;
 use crate::features::model::FeatureType;
 use crate::services::sync::SyncService;
-use crate::tests::mocks::{
-    MockBuildNotifier, MockContentReader, MockRepository,
-};
+use crate::tests::mocks::{create_test_repository, MockBuildNotifier, MockContentReader};
 use crate::watcher::watcher::{SyncCommand, run_watcher_worker};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -36,9 +35,9 @@ pub async fn setup_service_with_options(opts: TestOptions) -> (
     MockContentReader,
     MockBuildNotifier,
     Arc<ChasquiConfig>,
-    MockRepository,
+    SqliteRepository,
 ) {
-    let repo = MockRepository::new();
+    let repo = create_test_repository().await;
     let reader = MockContentReader::new();
     let notifier = MockBuildNotifier::new();
     let config = Arc::new(ChasquiConfig {
@@ -58,7 +57,7 @@ pub async fn setup_service_with_options(opts: TestOptions) -> (
     });
 
     let service = SyncService::new(
-        Box::new(repo.clone()),
+        repo.clone(),
         Arc::new(reader.clone()),
         Box::new(notifier.clone()),
         config.clone(),
@@ -74,7 +73,7 @@ async fn setup_service() -> (
     MockContentReader,
     MockBuildNotifier,
     Arc<ChasquiConfig>,
-    MockRepository,
+    SqliteRepository,
 ) {
     setup_service_with_options(TestOptions::default()).await
 }

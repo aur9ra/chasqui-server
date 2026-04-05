@@ -2,7 +2,7 @@ use crate::AppState;
 use crate::config::ChasquiConfig;
 use crate::features::pages::pages_router;
 use crate::services::sync::SyncService;
-use crate::tests::mocks::{MockBuildNotifier, MockContentReader, MockRepository};
+use crate::tests::mocks::{create_test_repository, MockBuildNotifier, MockContentReader};
 use axum::{body::Body, http::Request, Router, http::StatusCode};
 use rand::Rng;
 use std::path::PathBuf;
@@ -14,7 +14,7 @@ use tower::ServiceExt;
 
 // helper to flood the system with N unique pages for stress testing
 async fn setup_stress_state(page_count: usize) -> AppState {
-    let repo = MockRepository::new();
+    let repo = create_test_repository().await;
     let reader = MockContentReader::new();
     let notifier = MockBuildNotifier::new();
     let config = Arc::new(ChasquiConfig {
@@ -41,7 +41,7 @@ async fn setup_stress_state(page_count: usize) -> AppState {
     }
 
     let service = SyncService::new(
-        Box::new(repo),
+        repo.clone(),
         Arc::new(reader.clone()),
         Box::new(notifier),
         config.clone(),

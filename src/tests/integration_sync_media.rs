@@ -1,20 +1,20 @@
 use crate::features::model::Feature;
 use crate::services::sync::SyncService;
 use crate::tests::integration_sync_core::mock_config;
-use crate::tests::mocks::{MockBuildNotifier, MockContentReader, MockRepository};
+use crate::tests::mocks::{create_test_repository, MockBuildNotifier, MockContentReader};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[tokio::test]
 async fn test_sync_with_real_media_metadata() {
-    let repo = MockRepository::new();
+    let repo = create_test_repository().await;
     let reader = MockContentReader::new();
     let notifier = MockBuildNotifier::new();
     let content_dir = PathBuf::from("/content");
     let config = mock_config(content_dir.clone());
 
     let service = SyncService::new(
-        Box::new(repo.clone()),
+        repo.clone(),
         Arc::new(reader.clone()),
         Box::new(notifier.clone()),
         config.clone(),
@@ -118,14 +118,14 @@ async fn test_sync_with_real_media_metadata() {
 
 #[tokio::test]
 async fn test_sync_image_with_alt_text_sidecar() {
-    let repo = MockRepository::new();
+    let repo = create_test_repository().await;
     let reader = MockContentReader::new();
     let notifier = MockBuildNotifier::new();
     let content_dir = PathBuf::from("/content");
     let config = mock_config(content_dir.clone());
 
     let service = SyncService::new(
-        Box::new(repo.clone()),
+        repo.clone(),
         Arc::new(reader.clone()),
         Box::new(notifier.clone()),
         config.clone(),

@@ -1,7 +1,7 @@
 use crate::features::model::{Feature, FeatureType};
 use crate::services::sync::SyncService;
 use crate::tests::integration_sync_core::mock_config;
-use crate::tests::mocks::{MockBuildNotifier, MockContentReader, MockRepository};
+use crate::tests::mocks::{create_test_repository, MockBuildNotifier, MockContentReader};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -28,7 +28,7 @@ fn get_garbage_bytes(size: usize) -> Vec<u8> {
 
 #[tokio::test]
 async fn test_sync_corrupt_page_handles_gracefully() {
-    let repo = MockRepository::new();
+    let repo = create_test_repository().await;
     let reader = MockContentReader::new();
     let notifier = MockBuildNotifier::new();
     let content_dir = PathBuf::from("/content");
@@ -117,7 +117,7 @@ async fn test_sync_corrupt_page_handles_gracefully() {
     );
 
     let service = SyncService::new(
-        Box::new(repo.clone()),
+        repo.clone(),
         Arc::new(reader.clone()),
         Box::new(notifier.clone()),
         config.clone(),
@@ -170,7 +170,7 @@ async fn test_sync_corrupt_page_handles_gracefully() {
 
 #[tokio::test]
 async fn test_sync_corrupt_media_handles_gracefully() {
-    let repo = MockRepository::new();
+    let repo = create_test_repository().await;
     let reader = MockContentReader::new();
     let notifier = MockBuildNotifier::new();
     let content_dir = PathBuf::from("/content");
@@ -218,7 +218,7 @@ async fn test_sync_corrupt_media_handles_gracefully() {
     println!("Foundry: Generated {} corrupt media files.", file_count);
 
     let service = SyncService::new(
-        Box::new(repo.clone()),
+        repo.clone(),
         Arc::new(reader.clone()),
         Box::new(notifier.clone()),
         config.clone(),
@@ -250,22 +250,3 @@ async fn test_sync_corrupt_media_handles_gracefully() {
 
     println!("Foundry: Media corruption handled gracefully.");
 }
-
-// #[tokio::test]
-// fn test_sync_handles_malformed_files() {
-//  set up file reader
-//
-//  make a file that's a page, but its filename is "page.mp4"
-//  make a file that claims to be several gigabytes but is only 5kb
-//  make a file with infinite recursion in one of its links
-//
-//  init sync
-//
-//  sync should try to create page.mp4, fail, handle gracefully, and we should not be able to find
-//  page.mp4 in the pages table nor the video assets table
-//
-//  the "several gigabyte file" should parse just fine
-//
-//  the infinite recursion should also parse just fine with the link resolved
-//
-// }

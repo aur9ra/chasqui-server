@@ -1,6 +1,5 @@
-use crate::config::ChasquiConfig;
-use crate::database::sqlite::SqliteRepository;
-use crate::features::model::{Feature, FeatureType};
+use crate::database::SqliteRepository;
+use crate::features::model::FeatureType;
 use crate::io::{ContentMetadata, ContentReader, SyncFile};
 use crate::services::sync::SyncService;
 use crate::tests::integration_sync_core::mock_config;
@@ -12,7 +11,7 @@ use sqlx::{ConnectOptions, Executor};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tempfile::NamedTempFile;
-use tokio::time::{Duration, timeout};
+use tokio::time::Duration;
 
 fn get_test_dir(name: &str) -> PathBuf {
     let mut path = std::env::current_dir().unwrap();
@@ -58,7 +57,7 @@ async fn test_sync_handles_database_locked_gracefully() {
     let config = mock_config(content_dir.path().to_path_buf());
 
     let service = SyncService::new(
-        Box::new(repo),
+        repo.clone(),
         Arc::new(reader.clone()),
         Box::new(notifier.clone()),
         config.clone(),
@@ -229,7 +228,7 @@ async fn test_sync_handles_db_lock_during_update_gracefully() {
     });
 
     let service_result = SyncService::new(
-        Box::new(repo),
+        repo.clone(),
         reader.clone(),
         Box::new(notifier.clone()),
         config.clone(),
@@ -248,7 +247,7 @@ async fn test_sync_handles_db_lock_during_update_gracefully() {
     // Now init for real
     let repo_retry = SqliteRepository::new(pool.clone());
     let service = SyncService::new(
-        Box::new(repo_retry),
+        repo_retry.clone(),
         reader.clone(),
         Box::new(notifier.clone()),
         config.clone(),

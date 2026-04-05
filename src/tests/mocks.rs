@@ -1,15 +1,33 @@
-use crate::features::model::{Feature, FeatureType};
-use crate::features::pages::model::Page;
-use crate::io::{ContentMetadata, ContentReader, SyncFile, SyncStream};
+use crate::database::SqliteRepository;
+use crate::io::{ContentMetadata, ContentReader, SyncFile};
 use crate::services::ContentBuildNotifier;
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
+use sqlx::sqlite::SqlitePoolOptions;
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+// --- Test Helper: In-Memory Database ---
+/// Creates a SqliteRepository backed by an in-memory SQLite database.
+/// Migrations are run automatically. Each call creates a fresh, isolated database.
+pub async fn create_test_repository() -> SqliteRepository {
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("Failed to create in-memory database");
+
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("Failed to run migrations");
+
+    SqliteRepository::new(pool)
+}
 
 // --- Mock Stream for Large Files ---
 pub struct MockLargeStream {
@@ -367,7 +385,3 @@ impl ContentBuildNotifier for MockBuildNotifier {
         Ok(())
     }
 }
-
-// --- Mock: SyncRepository ---
-// Note: MockRepository trait implementations removed in Phase 1 refactoring.
-// Tests will be updated to use SqliteRepository with in-memory SQLite.

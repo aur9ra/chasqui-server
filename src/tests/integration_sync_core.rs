@@ -1,7 +1,7 @@
 use crate::config::ChasquiConfig;
 use crate::features::model::{Feature, FeatureType};
 use crate::services::sync::SyncService;
-use crate::tests::mocks::{MockBuildNotifier, MockContentReader, MockRepository};
+use crate::tests::mocks::{create_test_repository, MockBuildNotifier, MockContentReader};
 use chrono::NaiveDate;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -27,7 +27,7 @@ pub fn mock_config(temp_path: PathBuf) -> Arc<ChasquiConfig> {
 
 #[tokio::test]
 async fn test_sync_service_discovery_and_ingestion() {
-    let repo = MockRepository::new();
+    let repo = create_test_repository().await;
     let reader = MockContentReader::new();
     let notifier = MockBuildNotifier::new();
     let content_dir = PathBuf::from("/content");
@@ -43,7 +43,7 @@ identifier: hello
     reader.add_file("/content/md/post2.md", "# Post 2 with [link](post1.md)");
 
     let service = SyncService::new(
-        Box::new(repo.clone()),
+        repo.clone(),
         Arc::new(reader.clone()),
         Box::new(notifier.clone()),
         config.clone(),
@@ -65,14 +65,14 @@ identifier: hello
 
 #[tokio::test]
 async fn test_sync_service_link_validation() {
-    let repo = MockRepository::new();
+    let repo = create_test_repository().await;
     let reader = MockContentReader::new();
     let notifier = MockBuildNotifier::new();
     let content_dir = PathBuf::from("/content");
     let config = mock_config(content_dir.clone());
 
     let service = SyncService::new(
-        Box::new(repo.clone()),
+        repo.clone(),
         Arc::new(reader.clone()),
         Box::new(notifier.clone()),
         config.clone(),
@@ -127,13 +127,13 @@ New location",
 
 #[tokio::test]
 async fn test_sync_service_identifier_collision_reject_both() {
-    let repo = MockRepository::new();
+    let repo = create_test_repository().await;
     let reader = MockContentReader::new();
     let notifier = MockBuildNotifier::new();
     let config = mock_config(PathBuf::from("/content"));
 
     let service = SyncService::new(
-        Box::new(repo.clone()),
+        repo.clone(),
         Arc::new(reader.clone()),
         Box::new(notifier.clone()),
         config.clone(),
@@ -164,7 +164,7 @@ identifier: collision
 
 #[tokio::test]
 async fn test_sync_service_datetime_resolution() {
-    let repo = MockRepository::new();
+    let repo = create_test_repository().await;
     let reader = MockContentReader::new();
     let notifier = MockBuildNotifier::new();
     let config = mock_config(PathBuf::from("/content"));
@@ -180,7 +180,7 @@ async fn test_sync_service_datetime_resolution() {
     let time_b_str = "2026-12-25T00:00:00Z";
 
     let service = SyncService::new(
-        Box::new(repo.clone()),
+        repo.clone(),
         Arc::new(reader.clone()),
         Box::new(notifier.clone()),
         config.clone(),
@@ -236,14 +236,14 @@ modified_datetime: {}
 
 #[tokio::test]
 async fn test_sync_prevent_identity_hijack() {
-    let repo = MockRepository::new();
+    let repo = create_test_repository().await;
     let reader = MockContentReader::new();
     let notifier = MockBuildNotifier::new();
     let content_dir = PathBuf::from("/content");
     let config = mock_config(content_dir.clone());
 
     let service = SyncService::new(
-        Box::new(repo.clone()),
+        repo.clone(),
         Arc::new(reader.clone()),
         Box::new(notifier.clone()),
         config.clone(),
@@ -293,14 +293,14 @@ identifier: logo.png
 
 #[tokio::test]
 async fn test_sync_rejects_jailbreak_identifier() {
-    let repo = MockRepository::new();
+    let repo = create_test_repository().await;
     let reader = MockContentReader::new();
     let notifier = MockBuildNotifier::new();
     let content_dir = PathBuf::from("/content");
     let config = mock_config(content_dir.clone());
 
     let service = SyncService::new(
-        Box::new(repo.clone()),
+        repo.clone(),
         Arc::new(reader.clone()),
         Box::new(notifier.clone()),
         config.clone(),
@@ -327,7 +327,7 @@ async fn test_sync_rejects_jailbreak_identifier() {
 
 #[tokio::test]
 async fn test_sync_queues_updates() {
-    let repo = MockRepository::new();
+    let repo = create_test_repository().await;
     let inner_reader = MockContentReader::new();
     let notifier = MockBuildNotifier::new();
     let content_dir = PathBuf::from("/content");
@@ -338,7 +338,7 @@ async fn test_sync_queues_updates() {
     let blocking_reader = Arc::new(crate::tests::mocks::BlockingReader::new(inner_reader.clone(), barrier.clone()));
 
     let service = Arc::new(SyncService::new(
-        Box::new(repo.clone()),
+        repo.clone(),
         blocking_reader.clone(),
         Box::new(notifier.clone()),
         config.clone(),

@@ -11,7 +11,7 @@ use tokio::time::{Duration, sleep};
 #[tokio::test]
 async fn test_watcher_overlapping_mounts_no_redundancy() {
     // In this setup, TestOptions::default() already points all mounts to /content
-    let (service, reader, notifier, _config, repo) = setup_service_with_options(TestOptions::default()).await;
+    let (service, reader, notifier, _config, _repo) = setup_service_with_options(TestOptions::default()).await;
     
     let (tx, rx) = mpsc::channel(100);
     let full_sync_flag = Arc::new(AtomicBool::new(false));
@@ -19,10 +19,8 @@ async fn test_watcher_overlapping_mounts_no_redundancy() {
 
     // Reset counts after initial sync
     {
-        let mut n_count = notifier.call_count.lock().unwrap();
-        *n_count = 0;
-        let mut s_count = repo.save_count.lock().unwrap();
-        *s_count = 0;
+        let mut count = notifier.call_count.lock().unwrap();
+        *count = 0;
     }
 
     // Trigger one file change
@@ -38,6 +36,8 @@ async fn test_watcher_overlapping_mounts_no_redundancy() {
 
     // Despite multiple mounts watching this folder, we should only have ONE sync event
     assert_eq!(*notifier.call_count.lock().unwrap(), 1);
-    // AND exactly one DB write
-    assert_eq!(*repo.save_count.lock().unwrap(), 1);
+    
+    // Verify exactly one page in database
+    let pages = service.get_all_features_by_type(FeatureType::Page).await;
+    assert_eq!(pages.len(), 1);
 }

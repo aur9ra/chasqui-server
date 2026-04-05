@@ -1,7 +1,7 @@
 use crate::config::ChasquiConfig;
 use crate::features::model::{Feature, FeatureType};
 use crate::services::sync::SyncService;
-use crate::tests::mocks::{MockBuildNotifier, MockRepository};
+use crate::tests::mocks::{create_test_repository, MockBuildNotifier};
 use crate::io::local::LocalContentReader;
 use std::fs;
 use std::path::PathBuf;
@@ -37,7 +37,7 @@ async fn test_sync_handles_circular_and_dead_symlinks() {
     fs::write(index_path, "# Index").unwrap();
 
     // 5. Initialize sync service
-    let repo = MockRepository::new();
+    let repo = create_test_repository().await;
     let notifier = MockBuildNotifier::new();
     
     let config = Arc::new(ChasquiConfig {
@@ -63,7 +63,7 @@ async fn test_sync_handles_circular_and_dead_symlinks() {
     // Enforce 250ms limit for the entire initialization + initial sync
     let service = timeout(Duration::from_millis(250), async {
         SyncService::new(
-            Box::new(repo.clone()),
+            repo.clone(),
             reader.clone(),
             Box::new(notifier.clone()),
             config.clone(),
