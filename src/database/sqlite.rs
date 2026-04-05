@@ -4,7 +4,7 @@ use sqlx::{Pool, Sqlite};
 
 #[derive(Clone)]
 pub struct SqliteRepository {
-    pub pool: Pool<Sqlite>,
+    pub(crate) pool: Pool<Sqlite>,
 }
 
 impl SqliteRepository {

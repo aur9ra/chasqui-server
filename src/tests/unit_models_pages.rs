@@ -27,8 +27,6 @@ fn create_test_page() -> Page {
 
 // test the system's ability to convert Page -> DbPage (important for saving Pages to the database)
 // as well as insure a Vec<String> will convert to a JSON string
-// in the future, there will be more types of Pages for MySQL and Postgres's databases, and these
-// tests will have to be updated
 #[test]
 fn test_page_to_db_page_serialization() {
     // create a generic Page based on our example page function
