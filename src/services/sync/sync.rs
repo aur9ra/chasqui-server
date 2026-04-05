@@ -1,5 +1,5 @@
 use crate::config::ChasquiConfig;
-use crate::database::SyncRepository;
+use crate::database::SqliteRepository;
 use crate::features::model::{match_feature_to_type, Feature, FeatureFactory, FeatureType};
 use crate::io::ContentReader;
 use crate::services::cache::models::InMemoryCache;
@@ -13,20 +13,18 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 pub struct SyncService {
-    pub repo: Box<dyn SyncRepository>,
+    repo: SqliteRepository,
     pub reader: Arc<dyn ContentReader>,
     pub notifier: Box<dyn ContentBuildNotifier>,
     pub config: Arc<ChasquiConfig>,
-    // The "Map of the World"
     pub manifest: Arc<RwLock<Manifest>>,
-    // The "Production Line"
     pub factory: FeatureFactory,
     pub caches: HashMap<FeatureType, Box<dyn SyncableCache>>,
 }
 
 impl SyncService {
     pub async fn new(
-        repo: Box<dyn SyncRepository>,
+        repo: SqliteRepository,
         reader: Arc<dyn ContentReader>,
         notifier: Box<dyn ContentBuildNotifier>,
         config: Arc<ChasquiConfig>,

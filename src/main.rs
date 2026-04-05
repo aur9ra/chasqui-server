@@ -94,7 +94,7 @@ async fn main() -> anyhow::Result<()> {
     // sync_service holds an in-memory hashmap of our database.
     // reading from this (rather, asking it for stuff) is much quicker than reading from db.
     let sync_service = SyncService::new(
-        Box::new(repository),
+        repository,
         reader,
         Box::new(notifier),
         shared_config.clone(),
