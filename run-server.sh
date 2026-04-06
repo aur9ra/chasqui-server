@@ -46,16 +46,8 @@ if [ ! -f .env ]; then
   touch .env
 fi
 
-# stop existing server if it is running to prevent name or port conflicts.
-# we use 'down' instead of 'stop' to ensure a clean state for the new pull.
-echo "stopping existing server (if any)..."
-docker compose -f "$COMPOSE_FILE" down --remove-orphans
-# failsafe: if 'down' doesn't remove the container (stuck state, orphaned, etc.),
-# force remove it before starting a new one. '2>/dev/null' suppresses errors,
-# and '|| true' ensures script continues even if no container exists.
-docker rm -f chasqui-server 2>/dev/null || true
-
-# detect architecture to force correct image pull
+# pull the new image BEFORE stopping the existing server.
+# this ensures we're not stranded if the pull fails - the old container keeps running.
 ARCH=$(uname -m)
 if [ "$ARCH" = "x86_64" ]; then
   PLATFORM="linux/amd64"
@@ -68,6 +60,15 @@ else PLATFORM="linux/amd64"; fi # fallback
 IMAGE_NAME="ghcr.io/$GITHUB_USER/chasqui-server:$IMAGE_TAG"
 echo "pulling image ($PLATFORM) for $GITHUB_USER..."
 docker pull --platform "$PLATFORM" "$IMAGE_NAME"
+
+# now that we have the new image, stop existing server to prevent name or port conflicts.
+# we use 'down' instead of 'stop' to ensure a clean state for the new container.
+# failsafe: if 'down' doesn't remove the container (stuck state, orphaned, etc.),
+# force remove it before starting a new one. '2>/dev/null' suppresses errors,
+# and '|| true' ensures script continues even if no container exists.
+echo "stopping existing server (if any)..."
+docker compose -f "$COMPOSE_FILE" down --remove-orphans
+docker rm -f chasqui-server 2>/dev/null || true
 
 echo "starting backend container..."
 docker compose -f "$COMPOSE_FILE" up -d
