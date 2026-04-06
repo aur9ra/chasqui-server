@@ -50,6 +50,10 @@ fi
 # we use 'down' instead of 'stop' to ensure a clean state for the new pull.
 echo "stopping existing server (if any)..."
 docker compose -f "$COMPOSE_FILE" down --remove-orphans
+# failsafe: if 'down' doesn't remove the container (stuck state, orphaned, etc.),
+# force remove it before starting a new one. '2>/dev/null' suppresses errors,
+# and '|| true' ensures script continues even if no container exists.
+docker rm -f chasqui-server 2>/dev/null || true
 
 # detect architecture to force correct image pull
 ARCH=$(uname -m)
