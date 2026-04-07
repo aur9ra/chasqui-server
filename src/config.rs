@@ -18,6 +18,7 @@ pub struct ChasquiConfig {
     pub webhook_url: String,
     pub webhook_secret: String,
     pub port: u16,
+    pub nginx_media_prefixes: bool,
 }
 
 impl ChasquiConfig {
@@ -64,6 +65,9 @@ impl ChasquiConfig {
             .and_then(|val| val.parse::<u16>().ok())
             .unwrap_or(3000);
 
+        let nginx_media_prefixes =
+            std::env::var("NGINX_MEDIA_PREFIXES").unwrap_or_else(|_| "true".to_string()) == "true";
+
         Self {
             database_url,
             max_connections,
@@ -78,6 +82,7 @@ impl ChasquiConfig {
             webhook_url,
             webhook_secret,
             port,
+            nginx_media_prefixes,
         }
     }
 }
