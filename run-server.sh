@@ -59,7 +59,11 @@ else PLATFORM="linux/amd64"; fi # fallback
 
 IMAGE_NAME="ghcr.io/$GITHUB_USER/chasqui-server:$IMAGE_TAG"
 echo "pulling image ($PLATFORM) for $GITHUB_USER..."
-docker pull --platform "$PLATFORM" "$IMAGE_NAME"
+if ! docker pull --platform "$PLATFORM" "$IMAGE_NAME"; then
+    echo "Pull failed, building image locally..."
+    docker build --platform "$PLATFORM" -t "$IMAGE_NAME" "$SCRIPT_DIR"
+    echo "Successfully built image: $IMAGE_NAME"
+fi
 
 # now that we have the new image, stop existing server to prevent name or port conflicts.
 # we use 'down' instead of 'stop' to ensure a clean state for the new container.
