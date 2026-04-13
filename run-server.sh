@@ -61,7 +61,11 @@ IMAGE_NAME="ghcr.io/$GITHUB_USER/chasqui-server:$IMAGE_TAG"
 echo "pulling image ($PLATFORM) for $GITHUB_USER..."
 if ! docker pull --platform "$PLATFORM" "$IMAGE_NAME"; then
     echo "Pull failed, building image locally..."
-    docker build --platform "$PLATFORM" -t "$IMAGE_NAME" "$SCRIPT_DIR"
+    if ! docker build --platform "$PLATFORM" -t "$IMAGE_NAME" "$SCRIPT_DIR"; then
+        echo "Build failed — clearing BuildKit cache and retrying..."
+        docker builder prune --all --force
+        docker build --platform "$PLATFORM" -t "$IMAGE_NAME" "$SCRIPT_DIR"
+    fi
     echo "Successfully built image: $IMAGE_NAME"
 fi
 

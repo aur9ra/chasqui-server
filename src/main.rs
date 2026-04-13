@@ -34,8 +34,7 @@ async fn main() -> anyhow::Result<()> {
     // load general default environment variables
     dotenv::dotenv().ok();
 
-    let docker_runtime = std::env::var("DOCKER_RUNTIME")
-        .unwrap_or_default() == "true";
+    let docker_runtime = std::env::var("DOCKER_RUNTIME").unwrap_or_default() == "true";
 
     if docker_runtime {
         dotenv::from_filename(".env.containers.default").ok();
@@ -77,6 +76,11 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    sqlx::migrate!()
+        .run(&pool)
+        .await
+        .expect("Failed to run database migrations.");
+
     // initialize database access via desired database implementation
     let repository = SqliteRepository::new(pool.clone());
 
@@ -108,12 +112,6 @@ async fn main() -> anyhow::Result<()> {
         config: shared_config.clone(),
     };
 
-    // run migrations
-    sqlx::migrate!()
-        .run(&pool)
-        .await
-        .expect("Failed to run database migrations.");
-
     // start background file watchers
     start_directory_watcher(shared_sync_service.clone(), shared_config.clone());
 
@@ -137,15 +135,13 @@ async fn main() -> anyhow::Result<()> {
             axum::routing::get(features::handlers::metadata_handler),
         );
 
-    let app = Router::new()
-        .nest("/api", api_router)
-        .with_state(app_state);
+    let app = Router::new().nest("/api", api_router).with_state(app_state);
 
-let addr = format!("0.0.0.0:{}", config.port);
-let listener = tokio::net::TcpListener::bind(&addr).await?;
-println!("Server listening on http://{}", addr);
+    let addr = format!("0.0.0.0:{}", config.port);
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    println!("Server listening on http://{}", addr);
 
-axum::serve(listener, app).await?;
+    axum::serve(listener, app).await?;
 
     Ok(())
 }
