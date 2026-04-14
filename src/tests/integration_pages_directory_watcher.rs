@@ -54,6 +54,7 @@ pub async fn setup_service_with_options(opts: TestOptions) -> (
         webhook_url: "".into(),
         webhook_secret: "".into(),
         port: 3000,
+        nginx_media_prefixes: false,
     });
 
     let service = SyncService::new(

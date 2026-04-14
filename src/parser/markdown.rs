@@ -1,7 +1,64 @@
 use crate::parser::model::PageFrontMatter;
 use anyhow::Result;
-use gray_matter::{Matter, engine::YAML};
-use pulldown_cmark::{Event, Options as CmarkOptions, Parser, Tag, TagEnd, html};
+use gray_matter::{engine::YAML, Matter};
+use pulldown_cmark::{html, Event, Options as CmarkOptions, Parser, Tag, TagEnd};
+use std::collections::HashMap;
+
+fn get_media_nginx_prefix_map() -> HashMap<&'static str, &'static str> {
+    let mut map = HashMap::new();
+
+    // video extensions
+    for ext in ["mp4", "mov", "webm", "mkv", "ogv", "avi"] {
+        map.insert(ext, "/videos/");
+    }
+
+    // audio extensions
+    for ext in ["mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"] {
+        map.insert(ext, "/audio/");
+    }
+
+    // umage extensions
+    for ext in [
+        "jpg", "jpeg", "png", "webp", "gif", "heic", "svg", "ico", "tiff", "bmp",
+    ] {
+        map.insert(ext, "/images/");
+    }
+
+    map
+}
+
+pub fn is_external_url(url: &str) -> bool {
+    url.starts_with("http://")
+        || url.starts_with("https://")
+        || url.starts_with("mailto:")
+        || url.starts_with("//")
+    // is this exhaustive?
+    // this feels awful
+}
+
+// applies NGINX media prefix based on file extension and config
+// only applies to internal media urls (e.g. not mailto:..., https://...)
+pub fn apply_nginx_prefix(url: &str, enable_prefixes: bool) -> String {
+    if !enable_prefixes || is_external_url(url) {
+        return url.to_string();
+    }
+
+    // get filename after last dot
+    let extension = url.rsplit('.').next().map(|s| s.to_lowercase());
+
+    let prefix_map = get_media_nginx_prefix_map();
+
+    if let Some(ext) = extension {
+        if let Some(prefix) = prefix_map.get(ext.as_str()) {
+            // strip leading slash
+            let clean_url = url.trim_start_matches('/');
+            return format!("{}{}", prefix, clean_url);
+        }
+    }
+
+    // if there isn't a recognized extension, return as-is
+    url.to_string()
+}
 
 // extracts YAML frontmatter and returns the typed metadata alongside the raw markdown body
 pub fn extract_frontmatter(md_content: &str, filename: &str) -> Result<(PageFrontMatter, String)> {
@@ -42,7 +99,11 @@ pub fn extract_frontmatter(md_content: &str, filename: &str) -> Result<(PageFron
 }
 
 // compiles markdown content into HTML, and resolves links on-the-fly using the provided resolver
-pub fn compile_markdown_to_html<F>(markdown_content: &str, mut resolver: F) -> Result<String>
+pub fn compile_markdown_to_html<F>(
+    markdown_content: &str,
+    mut resolver: F,
+    nginx_media_prefixes: bool,
+) -> Result<String>
 where
     F: FnMut(&str) -> String,
 {
@@ -65,7 +126,7 @@ where
                 title,
                 id,
             }) => {
-                let new_url = resolver(&dest_url);
+                let resolved_url = resolver(&dest_url);
                 let lower_url = dest_url.to_lowercase();
 
                 if lower_url.ends_with(".mp4") || lower_url.ends_with(".mov") {
@@ -78,10 +139,11 @@ where
                             _ => {}
                         }
                     }
+                    let prefixed_url = apply_nginx_prefix(&resolved_url, nginx_media_prefixes);
                     events.push(Event::Html(
                         format!(
                             r#"<video controls aria-label="{}"><source src="{}" type="video/mp4">Your browser does not support the video tag.</video>"#,
-                            alt, new_url
+                            alt, prefixed_url
                         )
                         .into(),
                     ));
@@ -98,17 +160,19 @@ where
                             _ => {}
                         }
                     }
+                    let prefixed_url = apply_nginx_prefix(&resolved_url, nginx_media_prefixes);
                     events.push(Event::Html(
                         format!(
                             r#"<audio controls aria-label="{}"><source src="{}" type="audio/mpeg">Your browser does not support the audio tag.</audio>"#,
-                            alt, new_url
+                            alt, prefixed_url
                         )
                         .into(),
                     ));
                 } else {
+                    let prefixed_url = apply_nginx_prefix(&resolved_url, nginx_media_prefixes);
                     events.push(Event::Start(Tag::Image {
                         link_type,
-                        dest_url: new_url.into(),
+                        dest_url: prefixed_url.into(),
                         title,
                         id,
                     }));

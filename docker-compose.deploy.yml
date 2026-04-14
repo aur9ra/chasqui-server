@@ -11,9 +11,8 @@ services:
     ports:
       - "${HOST_PORT:-3003}:${PORT:-3003}"
     volumes:
-      - ${DB_HOST_PATH:-./db}:/db
+      - chasqui_db:/db
       - ${CONTENT_HOST_PATH:-./content}:/content
-      - chasqui_dist:/dist
     env_file:
       - .env.default
       - .env.containers.default
@@ -25,6 +24,9 @@ networks:
     external: true # assumes a separate manager or the frontend created the network
 
 volumes:
+  chasqui_db:
+    name: chasqui_db
+    external: true
   chasqui_dist:
     name: chasqui_dist
-    external: true # assumes a separate manager or the frontend created the volume
+    external: true

@@ -22,6 +22,7 @@ pub fn mock_config(temp_path: PathBuf) -> Arc<ChasquiConfig> {
         webhook_url: "http://localhost/build".into(),
         webhook_secret: "secret".into(),
         port: 3000,
+        nginx_media_prefixes: false,
     })
 }
 

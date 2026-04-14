@@ -31,6 +31,7 @@ async fn setup_stress_state(page_count: usize) -> AppState {
         webhook_url: "".into(),
         webhook_secret: "".into(),
         port: 3000,
+        nginx_media_prefixes: false,
     });
 
     // generate a bunch of fake blog posts

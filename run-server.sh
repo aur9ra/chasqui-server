@@ -32,12 +32,12 @@ docker network inspect chasqui_network >/dev/null 2>&1 ||
 docker volume inspect chasqui_dist >/dev/null 2>&1 ||
   (echo "creating volume: chasqui_dist" && docker volume create chasqui_dist)
 
-# ensure the database and content directories exist with correct permissions.
-# container.db needs 777 so both container (UID 1001) and host user can read/write.
+docker volume inspect chasqui_db >/dev/null 2>&1 ||
+  (echo "creating volume: chasqui_db" && docker volume create chasqui_db)
+
+# ensure the content directory exists with correct permissions.
 # content needs 777 so host user can edit files freely.
-mkdir -p db content
-touch db/container.db 2>/dev/null || true
-docker run --rm -v "$(pwd)/db:/db" alpine sh -c "chmod -R 777 /db"
+mkdir -p content
 docker run --rm -v "$(pwd)/content:/content" alpine sh -c "chmod -R 777 /content"
 
 # create .env if missing
@@ -78,13 +78,14 @@ echo "stopping existing server (if any)..."
 docker compose -f "$COMPOSE_FILE" down --remove-orphans
 docker rm -f chasqui-server 2>/dev/null || true
 
-echo "starting backend container..."
-docker compose -f "$COMPOSE_FILE" up -d
-
-# fix volume permissions. the frontend (root) creates files the backend (1001) serves.
-# we run a tiny temporary container to align ownership in the shared volume.
+# fix volume permissions BEFORE starting container. the frontend (root) creates files the backend (1001) serves.
+# we run a tiny temporary container to align ownership in the shared volumes.
 echo "aligning volume permissions..."
 docker run --rm -v chasqui_dist:/dist alpine chown -R 1001:1001 /dist
+docker run --rm -v chasqui_db:/db alpine chown -R 1001:1001 /db
+
+echo "starting backend container..."
+docker compose -f "$COMPOSE_FILE" up -d
 
 echo "Chasqui Server is up."
 echo "API & File Server is up..."

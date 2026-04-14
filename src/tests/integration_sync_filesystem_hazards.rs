@@ -54,6 +54,7 @@ async fn test_sync_handles_circular_and_dead_symlinks() {
         webhook_url: "".into(),
         webhook_secret: "".into(),
         port: 3000,
+        nginx_media_prefixes: false,
     });
 
     let reader = Arc::new(LocalContentReader {

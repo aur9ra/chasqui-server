@@ -60,7 +60,7 @@ impl Page {
         // Link Resolution Closure
         let html_content = compile_markdown_to_html(&content_body, |link| {
             manifest.resolve_link(link, Path::new(&filename), config)
-        })?;
+        }, config.nginx_media_prefixes)?;
 
         let modified_datetime = resolve_datetime(frontmatter.modified_datetime, metadata.modified);
         let created_datetime = resolve_datetime(frontmatter.created_datetime, metadata.created);

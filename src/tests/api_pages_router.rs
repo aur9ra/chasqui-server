@@ -37,6 +37,7 @@ async fn setup_api_test_state() -> (AppState, tempfile::TempDir) {
         webhook_url: "".into(),
         webhook_secret: "".into(),
         port: 3000,
+        nginx_media_prefixes: false,
     });
 
     let file_path = content_dir.join("api-test.md");

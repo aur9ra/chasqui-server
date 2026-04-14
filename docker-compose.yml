@@ -14,9 +14,8 @@ services:
     ports:
       - "${HOST_PORT:-3003}:${PORT:-3003}"
     volumes:
-      - ${DB_HOST_PATH:-./db}:/db
+      - chasqui_db:/db
       - ${CONTENT_HOST_PATH:-./content}:/content
-      - chasqui_dist:/dist
     env_file:
       - .env.default
       - .env.containers.default
@@ -27,5 +26,8 @@ networks:
     external: true
 
 volumes:
+  chasqui_db:
+    name: chasqui_db
   chasqui_dist:
+    name: chasqui_dist
     external: true
