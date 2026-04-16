@@ -81,8 +81,8 @@ async fn test_sync_renders_large_page() {
         .expect("Large page missing");
     if let Feature::Page(p) = feature {
         assert_eq!(p.identifier, "large-page");
-        assert!(p.html_content.len() > 10 * 1024 * 1024); // Should be > 10MB of HTML
-        assert!(p.html_content.contains("This is a repeating line"));
+        assert!(p.md_content.len() > 10 * 1024 * 1024); // Should be > 10MB of resolved markdown
+        assert!(p.md_content.contains("This is a repeating line"));
     }
 
     println!("Large Page Test: Rendered 10MB of Markdown successfully.");

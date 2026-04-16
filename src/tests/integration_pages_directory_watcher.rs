@@ -198,5 +198,5 @@ async fn test_watcher_worker_add_delete_recreate_cancellation() {
     // the final result should be Version 2
     let feature = service.get_feature_by_identifier("flicker").await.unwrap();
     let page = if let crate::features::model::Feature::Page(p) = feature { p } else { panic!("Expected page") };
-    assert_eq!(page.html_content.trim(), "<h1>Version 2</h1>");
+    assert_eq!(page.md_content.trim(), "# Version 2");
 }

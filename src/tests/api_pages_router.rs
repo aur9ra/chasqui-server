@@ -89,7 +89,7 @@ async fn test_get_page_metadata_success() {
     assert_eq!(json["type"], "Page");
     let data = &json["data"];
     assert_eq!(data["identifier"], "api-test");
-    assert!(data["html_content"].as_str().unwrap().contains("<h1>API Test Content</h1>"));
+    assert!(data["md_content"].as_str().unwrap().contains("# API Test Content"));
 
     assert!(data["tags"].is_array());
     let tags = data["tags"].as_array().unwrap();

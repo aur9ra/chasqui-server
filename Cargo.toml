@@ -34,6 +34,7 @@ tower = { version = "=0.5.2", features = ["util"] }
 walkdir = "=2.5.0"
 xxhash-rust = { version = "=0.8.15", features = ["xxh3"] }
 uuid = { version = "=1.12.1", features = ["v4", "serde"] }
+pulldown-cmark-to-cmark = "22.0.0"
 
 [dev-dependencies]
 tempfile = "3.17"

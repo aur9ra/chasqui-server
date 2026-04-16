@@ -54,36 +54,32 @@ impl SqliteRepository {
         sqlx::query!(
             r#"
             INSERT INTO pages (
-                identifier, filename, name, html_content, md_content, 
+                identifier, filename, name, md_content, 
                 content_hash, tags, modified_datetime, created_datetime,
-                file_path, new_path, mime_type
+                file_path, new_path
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(filename) DO UPDATE SET
                 identifier = excluded.identifier,
                 name = excluded.name,
-                html_content = excluded.html_content,
                 md_content = excluded.md_content,
                 content_hash = excluded.content_hash,
                 tags = excluded.tags,
                 modified_datetime = excluded.modified_datetime,
                 created_datetime = excluded.created_datetime,
                 file_path = excluded.file_path,
-                new_path = excluded.new_path,
-                mime_type = excluded.mime_type
+                new_path = excluded.new_path
             "#,
             db_page.identifier,
             db_page.filename,
             db_page.name,
-            db_page.html_content,
             db_page.md_content,
             db_page.content_hash,
             db_page.tags,
             db_page.modified_datetime,
             db_page.created_datetime,
             db_page.file_path,
-            db_page.new_path,
-            db_page.mime_type
+            db_page.new_path
         )
         .execute(&self.pool)
         .await

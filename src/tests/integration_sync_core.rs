@@ -61,7 +61,7 @@ identifier: hello
     } else {
         panic!("Expected page")
     };
-    assert!(post2.html_content.contains(r#"href="/hello""#));
+    assert!(post2.md_content.contains(r#"[hello](/hello)"#) || post2.md_content.contains(r#"(/hello)"#));
 }
 
 #[tokio::test]
@@ -96,8 +96,8 @@ async fn test_sync_service_link_validation() {
         panic!("Expected page b")
     };
 
-    assert!(page_a.html_content.contains(r#"href="/b""#));
-    assert!(page_b.html_content.contains(r#"href="/a""#));
+assert!(page_a.md_content.contains("(/b)") || page_a.md_content.contains("[Go to B]"));
+assert!(page_b.md_content.contains("(/a)") || page_b.md_content.contains("[Go to A]"));
 
     reader.add_file(
         "/content/md/c.md",

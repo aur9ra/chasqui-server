@@ -127,60 +127,11 @@ impl FeatureFactory {
     async fn build_image_with_manifest(&self, claim: ManifestClaim, manifest: &Manifest) -> Result<ImageAsset> {
         let full_path = claim.mount_path.join(&claim.filename);
         ImageAsset::new_from_file(
-            &full_path,
-            &self.config,
-            &*self.reader,
-            manifest,
-        )
-        .await
-    }
-
-    async fn build_page(&self, claim: ManifestClaim) -> Result<Page> {
-        let manifest_guard = self.manifest.read().await;
-        let full_path = claim.mount_path.join(&claim.filename);
-
-        Page::new_from_file(
-            &full_path,
-            &self.config,
-            &*self.reader,
-            &manifest_guard,
-        )
-        .await
-    }
-
-    async fn build_video(&self, claim: ManifestClaim) -> Result<VideoAsset> {
-        let manifest_guard = self.manifest.read().await;
-        let full_path = claim.mount_path.join(&claim.filename);
-        VideoAsset::new_from_file(
-            &full_path,
-            &self.config,
-            &*self.reader,
-            &manifest_guard,
-        )
-        .await
-    }
-
-    async fn build_audio(&self, claim: ManifestClaim) -> Result<AudioAsset> {
-        let manifest_guard = self.manifest.read().await;
-        let full_path = claim.mount_path.join(&claim.filename);
-        AudioAsset::new_from_file(
-            &full_path,
-            &self.config,
-            &*self.reader,
-            &manifest_guard,
-        )
-        .await
-    }
-
-    async fn build_image(&self, claim: ManifestClaim) -> Result<ImageAsset> {
-        let manifest_guard = self.manifest.read().await;
-        let full_path = claim.mount_path.join(&claim.filename);
-        ImageAsset::new_from_file(
-            &full_path,
-            &self.config,
-            &*self.reader,
-            &manifest_guard,
-        )
-        .await
-    }
+&full_path,
+             &self.config,
+             &*self.reader,
+             manifest,
+         )
+         .await
+     }
 }
