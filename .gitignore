@@ -5,7 +5,6 @@ tar.sh
 .env
 buildlog.txt
 data/
-.sqlx/
 
 test_files/
 testing_ground/
