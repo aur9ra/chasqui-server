@@ -383,10 +383,12 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sqlx",
  "tempfile",
  "tokio",
  "tower",
  "uuid",
+ "xxhash-rust",
 ]
 
 [[package]]
