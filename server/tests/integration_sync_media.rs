@@ -25,37 +25,37 @@ async fn test_sync_with_real_media_metadata() {
     .unwrap();
 
     reader.load_real_file(
-        "/content/videos/test_video1.mp4",
-        Path::new("test_files/test_video1.mp4"),
+        "/content/videos/test-video1.mp4",
+        Path::new("../test_files/test-video1.mp4"),
     );
     reader.load_real_file(
         "/content/videos/test-video2.mp4",
-        Path::new("test_files/test-video2.mp4"),
+        Path::new("../test_files/test-video2.mp4"),
     );
     reader.load_real_file(
-        "/content/images/test_image_small_1.png",
-        Path::new("test_files/test_image_small_1.png"),
+        "/content/images/test-image-small-1.png",
+        Path::new("../test_files/test-image-small-1.png"),
     );
     reader.load_real_file(
-        "/content/images/test_image_small_2.png",
-        Path::new("test_files/test_image_small_2.png"),
+        "/content/images/test-image-small-2.png",
+        Path::new("../test_files/test-image-small-2.png"),
     );
     reader.load_real_file(
         "/content/audio/test-sound1.mp3",
-        Path::new("test_files/test-sound1.mp3"),
+        Path::new("../test_files/test-sound1.mp3"),
     );
     reader.load_real_file(
         "/content/audio/test-sound2.mp3",
-        Path::new("test_files/test-sound2.mp3"),
+        Path::new("../test_files/test-sound2.mp3"),
     );
     reader.load_real_file(
         "/content/audio/test-sound3.mp3",
-        Path::new("test_files/test-sound3.mp3"),
+        Path::new("../test_files/test-sound3.mp3"),
     );
 
     service.full_sync().await.unwrap();
 
-    if let Some(Feature::Video(v)) = service.get_feature_by_identifier("test_video1.mp4").await {
+    if let Some(Feature::Video(v)) = service.get_feature_by_identifier("test-video1.mp4").await {
         assert_eq!(v.width.unwrap(), 1920);
         assert_eq!(v.height.unwrap(), 1080);
         assert!(v.duration_seconds.unwrap() >= 19 && v.duration_seconds.unwrap() <= 20);
@@ -74,7 +74,7 @@ async fn test_sync_with_real_media_metadata() {
     }
 
     if let Some(Feature::Image(i)) = service
-        .get_feature_by_identifier("test_image_small_1.png")
+        .get_feature_by_identifier("test-image-small-1.png")
         .await
     {
         assert_eq!(i.width.unwrap(), 100);

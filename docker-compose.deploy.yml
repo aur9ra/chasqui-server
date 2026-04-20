@@ -11,7 +11,7 @@ services:
     ports:
       - "${HOST_PORT:-3003}:${PORT:-3003}"
     volumes:
-      - chasqui_db:/db
+      - chasqui_db:/data
       - ${CONTENT_HOST_PATH:-./content}:/content
     env_file:
       - .env.default

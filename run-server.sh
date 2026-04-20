@@ -58,13 +58,19 @@ elif [ "$ARCH" = "armv7l" ]; then
 else PLATFORM="linux/amd64"; fi # fallback
 
 IMAGE_NAME="ghcr.io/$GITHUB_USER/chasqui-server:$IMAGE_TAG"
+NO_CACHE=${NO_CACHE:-false}
+BUILD_FLAGS="--platform $PLATFORM"
+if [ "$NO_CACHE" = "true" ]; then
+    BUILD_FLAGS="$BUILD_FLAGS --no-cache"
+fi
+
 echo "pulling image ($PLATFORM) for $GITHUB_USER..."
 if ! docker pull --platform "$PLATFORM" "$IMAGE_NAME"; then
     echo "Pull failed, building image locally..."
-    if ! docker build --platform "$PLATFORM" -t "$IMAGE_NAME" "$SCRIPT_DIR"; then
+    if ! docker build $BUILD_FLAGS -t "$IMAGE_NAME" "$SCRIPT_DIR"; then
         echo "Build failed — clearing BuildKit cache and retrying..."
         docker builder prune --all --force
-        docker build --platform "$PLATFORM" -t "$IMAGE_NAME" "$SCRIPT_DIR"
+        docker build $BUILD_FLAGS -t "$IMAGE_NAME" "$SCRIPT_DIR"
     fi
     echo "Successfully built image: $IMAGE_NAME"
 fi
@@ -82,7 +88,7 @@ docker rm -f chasqui-server 2>/dev/null || true
 # we run a tiny temporary container to align ownership in the shared volumes.
 echo "aligning volume permissions..."
 docker run --rm -v chasqui_dist:/dist alpine chown -R 1001:1001 /dist
-docker run --rm -v chasqui_db:/db alpine chown -R 1001:1001 /db
+docker run --rm -v chasqui_db:/data alpine chown -R 1001:1001 /data
 
 echo "starting backend container..."
 docker compose -f "$COMPOSE_FILE" up -d

@@ -5,7 +5,7 @@ FROM alpine:3.20 AS certs
 RUN apk add --no-cache ca-certificates
 
 # container 2: builder
-# use '--platform=$BUILDPLATFORM' to ensure this stage always runs natively on the 
+# use '--platform=$BUILDPLATFORM' to ensure this stage always runs natively on the
 # host's architecture (e.g., x86_64), avoiding extremely slow QEMU emulation
 FROM --platform=$BUILDPLATFORM rust:1.88-bullseye AS builder
 
@@ -27,44 +27,43 @@ RUN rustup target add x86_64-unknown-linux-musl && \
 
 WORKDIR /app
 
-# compile dependencies and cache
-# so, if we edit our code, we don't have to recompile all dependencies for 15 minutes
+# copy workspace manifests and member manifests
 COPY Cargo.toml Cargo.lock ./
+COPY core/Cargo.toml ./core/
+COPY db/Cargo.toml ./db/
+COPY server/Cargo.toml ./server/
+COPY cli/Cargo.toml ./cli/
 
-# create a dummy main to pre-compile the dependency tree
-RUN mkdir -p src && echo "fn main() { println!(\"DUMMY BINARY - IF YOU SEE THIS, THE BUILD FAILED TO OVERWRITE\"); }" > src/main.rs
+# create minimal stub sources so cargo can resolve the workspace
+RUN mkdir -p core/src && echo "" > core/src/lib.rs && \
+mkdir -p db/src && echo "" > db/src/lib.rs && \
+mkdir -p server/src && echo "fn main() {}" > server/src/main.rs && \
+mkdir -p cli/src && echo "" > cli/src/lib.rs && \
+echo "fn main() {}" > cli/src/main.rs
 
-# build dependencies for the target architecture
-ARG TARGETARCH
-RUN \
-  if [ "$TARGETARCH" = "amd64" ]; then export TARGET="x86_64-unknown-linux-musl"; \
-  elif [ "$TARGETARCH" = "arm64" ]; then export TARGET="aarch64-unknown-linux-musl"; \
-  elif [ "$TARGETARCH" = "arm" ]; then export TARGET="armv7-unknown-linux-musleabihf"; \
-  else echo "unsupported architecture: $TARGETARCH" >&2; exit 1; fi && \
-  \
-  SQLX_OFFLINE=true cargo zigbuild --release --target $TARGET || true
+# fetch dependencies (downloads crates without compiling, unfortunately)
+RUN cargo fetch
 
-# final application build
-# remove the dummy source so it doesn't interfere with the real source copy
-RUN rm -rf src
+# remove stub sources before copying real sources
+RUN rm -rf core/src db/src server/src cli/src
 
-# now copy the actual source code and offline database metadata
-COPY . .
+# copy source code for all workspace members
+COPY core/src/ ./core/src/
+COPY db/src/ ./db/src/
+COPY db/migrations/ ./db/migrations/
+COPY db/.sqlx/ ./db/.sqlx/
+COPY server/src/ ./server/src/
+COPY cli/src/ ./cli/src/
 
 # build the fully static release binary
+ARG TARGETARCH
 RUN \
-  if [ "$TARGETARCH" = "amd64" ]; then export TARGET="x86_64-unknown-linux-musl"; \
-  elif [ "$TARGETARCH" = "arm64" ]; then export TARGET="aarch64-unknown-linux-musl"; \
-  elif [ "$TARGETARCH" = "arm" ]; then export TARGET="armv7-unknown-linux-musleabihf"; \
-  else echo "unsupported architecture: $TARGETARCH" >&2; exit 1; fi && \
-  \
-  # force cargo to re-examine the source files
-  touch src/main.rs && \
-  \
-  SQLX_OFFLINE=true cargo zigbuild --release --target $TARGET && \
-  \
-  # move the binary to a common location for the final stage
-  cp /app/target/$TARGET/release/chasqui-server /app/chasqui-server
+if [ "$TARGETARCH" = "amd64" ]; then export TARGET="x86_64-unknown-linux-musl"; \
+elif [ "$TARGETARCH" = "arm64" ]; then export TARGET="aarch64-unknown-linux-musl"; \
+elif [ "$TARGETARCH" = "arm" ]; then export TARGET="armv7-unknown-linux-musleabihf"; \
+else echo "unsupported architecture: $TARGETARCH" >&2; exit 1; fi && \
+SQLX_OFFLINE=true cargo zigbuild --release -p chasqui-server --target $TARGET && \
+cp /app/target/$TARGET/release/chasqui-server /app/chasqui-server
 
 
 # container 3: final container
