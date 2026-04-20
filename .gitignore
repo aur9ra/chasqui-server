@@ -4,7 +4,7 @@ tar.sh
 *.tar
 .env
 buildlog.txt
-db/
+data/
 
 test_files/
 testing_ground/
