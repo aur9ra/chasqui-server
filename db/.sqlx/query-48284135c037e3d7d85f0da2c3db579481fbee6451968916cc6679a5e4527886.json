@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO audio_assets (\n                id, filename, identifier, file_path, content_hash,\n                new_path, bytes_size, created_at, modified_at,\n                bitrate_kbps, duration_seconds, sample_rate_hz, channels, codec\n            )\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n            ON CONFLICT(filename) DO UPDATE SET\n                identifier = excluded.identifier,\n                content_hash = excluded.content_hash,\n                new_path = excluded.new_path,\n                bytes_size = excluded.bytes_size,\n                modified_at = excluded.modified_at,\n                bitrate_kbps = excluded.bitrate_kbps,\n                duration_seconds = excluded.duration_seconds,\n                sample_rate_hz = excluded.sample_rate_hz,\n                channels = excluded.channels,\n                codec = excluded.codec\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 14
+    },
+    "nullable": []
+  },
+  "hash": "48284135c037e3d7d85f0da2c3db579481fbee6451968916cc6679a5e4527886"
+}

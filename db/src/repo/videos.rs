@@ -15,7 +15,6 @@ struct DbVideo {
     content_hash: String,
     new_path: Option<String>,
     bytes_size: i64,
-    mime_type: String,
     created_at: Option<NaiveDateTime>,
     modified_at: Option<NaiveDateTime>,
     duration_seconds: Option<i64>,
@@ -38,9 +37,8 @@ impl TryFrom<DbVideo> for VideoAsset {
                 file_path: PathBuf::from(db.file_path),
                 content_hash: db.content_hash,
                 new_path: db.new_path.map(PathBuf::from),
-                bytes_size: db.bytes_size as u64,
-                mime_type: db.mime_type,
-                created_at: db.created_at,
+        bytes_size: db.bytes_size as u64,
+        created_at: db.created_at,
                 modified_at: db.modified_at,
             },
             duration_seconds: db.duration_seconds.map(|v| v as u32),
@@ -65,9 +63,8 @@ impl SqliteRepository {
                 file_path, 
                 content_hash, 
                 new_path, 
-                bytes_size, 
-                mime_type, 
-                created_at, 
+        bytes_size,
+        created_at,
                 modified_at, 
                 duration_seconds, 
                 width, 
@@ -100,9 +97,8 @@ impl SqliteRepository {
                 file_path, 
                 content_hash, 
                 new_path, 
-                bytes_size, 
-                mime_type, 
-                created_at, 
+        bytes_size,
+        created_at,
                 modified_at, 
                 duration_seconds, 
                 width, 
@@ -140,17 +136,16 @@ impl SqliteRepository {
         sqlx::query!(
             r#"
             INSERT INTO video_assets (
-                id, filename, identifier, file_path, content_hash, 
-                new_path, bytes_size, mime_type, created_at, modified_at,
+                id, filename, identifier, file_path, content_hash,
+                new_path, bytes_size, created_at, modified_at,
                 duration_seconds, width, height, frame_rate, video_codec, audio_codec
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(filename) DO UPDATE SET
                 identifier = excluded.identifier,
                 content_hash = excluded.content_hash,
                 new_path = excluded.new_path,
                 bytes_size = excluded.bytes_size,
-                mime_type = excluded.mime_type,
                 modified_at = excluded.modified_at,
                 duration_seconds = excluded.duration_seconds,
                 width = excluded.width,
@@ -166,7 +161,6 @@ impl SqliteRepository {
             meta.content_hash,
             new_path,
             bytes_size,
-            meta.mime_type,
             meta.created_at,
             meta.modified_at,
             duration_seconds,

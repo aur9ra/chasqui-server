@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT \n                id as \"id: Uuid\", \n                filename, \n                identifier, \n                file_path, \n                content_hash, \n                new_path, \n                bytes_size, \n                mime_type, \n                created_at, \n                modified_at, \n                duration_seconds, \n                width, \n                height, \n                frame_rate, \n                video_codec, \n                audio_codec \n            FROM video_assets \n            WHERE filename = ?\n            ",
+  "query": "\n            SELECT \n                id as \"id: Uuid\", \n                filename, \n                identifier, \n                file_path, \n                content_hash, \n                new_path, \n        bytes_size,\n        created_at,\n                modified_at, \n                duration_seconds, \n                width, \n                height, \n                frame_rate, \n                video_codec, \n                audio_codec \n            FROM video_assets \n            WHERE filename = ?\n            ",
   "describe": {
     "columns": [
       {
@@ -39,48 +39,43 @@
         "type_info": "Integer"
       },
       {
-        "name": "mime_type",
-        "ordinal": 7,
-        "type_info": "Text"
-      },
-      {
         "name": "created_at",
-        "ordinal": 8,
+        "ordinal": 7,
         "type_info": "Datetime"
       },
       {
         "name": "modified_at",
-        "ordinal": 9,
+        "ordinal": 8,
         "type_info": "Datetime"
       },
       {
         "name": "duration_seconds",
-        "ordinal": 10,
+        "ordinal": 9,
         "type_info": "Integer"
       },
       {
         "name": "width",
-        "ordinal": 11,
+        "ordinal": 10,
         "type_info": "Integer"
       },
       {
         "name": "height",
-        "ordinal": 12,
+        "ordinal": 11,
         "type_info": "Integer"
       },
       {
         "name": "frame_rate",
-        "ordinal": 13,
+        "ordinal": 12,
         "type_info": "Integer"
       },
       {
         "name": "video_codec",
-        "ordinal": 14,
+        "ordinal": 13,
         "type_info": "Text"
       },
       {
         "name": "audio_codec",
-        "ordinal": 15,
+        "ordinal": 14,
         "type_info": "Text"
       }
     ],
@@ -95,7 +90,6 @@
       false,
       true,
       false,
-      false,
       true,
       true,
       true,
@@ -106,5 +100,5 @@
       true
     ]
   },
-  "hash": "57ce732db7dd452767d65df86df8a4af1588b8a4069d25ea54423ebbb9d61f31"
+  "hash": "dd2bbb9a948eef80cbae28377a344710a3db1903ab6be57bb4d8f0d4dfd3477e"
 }

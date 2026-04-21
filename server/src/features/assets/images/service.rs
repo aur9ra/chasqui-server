@@ -25,15 +25,6 @@ pub async fn create_image_asset(
 
     let identifier = manifest.file_to_id.get(&filename).cloned();
 
-    let mime_type = match path.extension().and_then(|s| s.to_str()).map(|s| s.to_lowercase()).as_deref() {
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("png") => "image/png",
-        Some("webp") => "image/webp",
-        Some("gif") => "image/gif",
-        Some("svg") => "image/svg+xml",
-        _ => "application/octet-stream",
-    };
-
     let tech_meta = {
         let stream = reader.open_file(path).await?;
         extract_image_metadata(stream)
@@ -53,9 +44,8 @@ pub async fn create_image_asset(
             file_path: path.to_path_buf(),
             content_hash,
             new_path: None,
-            bytes_size,
-            mime_type: mime_type.to_string(),
-            created_at: metadata.created,
+        bytes_size,
+        created_at: metadata.created,
             modified_at: metadata.modified,
         },
         width: tech_meta.width,

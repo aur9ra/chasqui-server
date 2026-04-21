@@ -15,7 +15,6 @@ struct DbImage {
     content_hash: String,
     new_path: Option<String>,
     bytes_size: i64,
-    mime_type: String,
     created_at: Option<NaiveDateTime>,
     modified_at: Option<NaiveDateTime>,
     width: Option<i64>,
@@ -35,9 +34,8 @@ impl TryFrom<DbImage> for ImageAsset {
                 file_path: PathBuf::from(db.file_path),
                 content_hash: db.content_hash,
                 new_path: db.new_path.map(PathBuf::from),
-                bytes_size: db.bytes_size as u64,
-                mime_type: db.mime_type,
-                created_at: db.created_at,
+        bytes_size: db.bytes_size as u64,
+        created_at: db.created_at,
                 modified_at: db.modified_at,
             },
             width: db.width.map(|w| w as u32),
@@ -59,9 +57,8 @@ impl SqliteRepository {
                 file_path, 
                 content_hash, 
                 new_path, 
-                bytes_size, 
-                mime_type, 
-                created_at, 
+        bytes_size,
+        created_at,
                 modified_at, 
                 width, 
                 height, 
@@ -91,9 +88,8 @@ impl SqliteRepository {
                 file_path, 
                 content_hash, 
                 new_path, 
-                bytes_size, 
-                mime_type, 
-                created_at, 
+        bytes_size,
+        created_at,
                 modified_at, 
                 width, 
                 height, 
@@ -123,38 +119,36 @@ impl SqliteRepository {
         let width = image.width.map(|w| w as i64);
         let height = image.height.map(|h| h as i64);
 
-        sqlx::query!(
-            r#"
-            INSERT INTO image_assets (
-                id, filename, identifier, file_path, content_hash, 
-                new_path, bytes_size, mime_type, created_at, modified_at,
-                width, height, alt_text
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(filename) DO UPDATE SET
-                identifier = excluded.identifier,
-                content_hash = excluded.content_hash,
-                new_path = excluded.new_path,
-                bytes_size = excluded.bytes_size,
-                mime_type = excluded.mime_type,
-                modified_at = excluded.modified_at,
-                width = excluded.width,
-                height = excluded.height,
-                alt_text = excluded.alt_text
-            "#,
-            meta.id,
-            meta.filename,
-            meta.identifier,
-            file_path,
-            meta.content_hash,
-            new_path,
-            bytes_size,
-            meta.mime_type,
-            meta.created_at,
-            meta.modified_at,
-            width,
-            height,
-            image.alt_text
+    sqlx::query!(
+        r#"
+        INSERT INTO image_assets (
+            id, filename, identifier, file_path, content_hash,
+            new_path, bytes_size, created_at, modified_at,
+            width, height, alt_text
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(filename) DO UPDATE SET
+            identifier = excluded.identifier,
+            content_hash = excluded.content_hash,
+            new_path = excluded.new_path,
+            bytes_size = excluded.bytes_size,
+            modified_at = excluded.modified_at,
+            width = excluded.width,
+            height = excluded.height,
+            alt_text = excluded.alt_text
+        "#,
+        meta.id,
+        meta.filename,
+        meta.identifier,
+        file_path,
+        meta.content_hash,
+        new_path,
+        bytes_size,
+        meta.created_at,
+        meta.modified_at,
+        width,
+        height,
+        image.alt_text
         )
         .execute(&self.pool)
         .await

@@ -26,12 +26,6 @@ pub async fn create_video_asset(
     let identifier = manifest.file_to_id.get(&filename).cloned();
 
     let ext = path.extension().and_then(|s| s.to_str()).map(|s| s.to_lowercase()).unwrap_or_default();
-    let mime_type = match ext.as_str() {
-        "mp4" => "video/mp4",
-        "mov" => "video/quicktime",
-        "webm" => "video/webm",
-        _ => "application/octet-stream",
-    };
 
     let tech_meta = {
         let stream = reader.open_file(path).await?;
@@ -46,9 +40,8 @@ pub async fn create_video_asset(
             file_path: path.to_path_buf(),
             content_hash,
             new_path: None,
-            bytes_size,
-            mime_type: mime_type.to_string(),
-            created_at: metadata.created,
+        bytes_size,
+        created_at: metadata.created,
             modified_at: metadata.modified,
         },
         duration_seconds: tech_meta.duration_seconds,

@@ -8,7 +8,6 @@ CREATE TABLE IF NOT EXISTS image_assets (
     content_hash TEXT NOT NULL,
     new_path TEXT, -- Optional optimized path
     bytes_size INTEGER NOT NULL,
-    mime_type TEXT NOT NULL,
     created_at DATETIME,
     modified_at DATETIME,
     -- Image Specifics
@@ -25,7 +24,6 @@ CREATE TABLE IF NOT EXISTS audio_assets (
     content_hash TEXT NOT NULL,
     new_path TEXT,
     bytes_size INTEGER NOT NULL,
-    mime_type TEXT NOT NULL,
     created_at DATETIME,
     modified_at DATETIME,
     -- Audio Specifics
@@ -44,7 +42,6 @@ CREATE TABLE IF NOT EXISTS video_assets (
     content_hash TEXT NOT NULL,
     new_path TEXT,
     bytes_size INTEGER NOT NULL,
-    mime_type TEXT NOT NULL,
     created_at DATETIME,
     modified_at DATETIME,
     -- Video Specifics

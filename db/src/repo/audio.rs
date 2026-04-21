@@ -15,7 +15,6 @@ struct DbAudio {
     content_hash: String,
     new_path: Option<String>,
     bytes_size: i64,
-    mime_type: String,
     created_at: Option<NaiveDateTime>,
     modified_at: Option<NaiveDateTime>,
     bitrate_kbps: Option<i64>,
@@ -37,9 +36,8 @@ impl TryFrom<DbAudio> for AudioAsset {
                 file_path: PathBuf::from(db.file_path),
                 content_hash: db.content_hash,
                 new_path: db.new_path.map(PathBuf::from),
-                bytes_size: db.bytes_size as u64,
-                mime_type: db.mime_type,
-                created_at: db.created_at,
+        bytes_size: db.bytes_size as u64,
+        created_at: db.created_at,
                 modified_at: db.modified_at,
             },
             bitrate_kbps: db.bitrate_kbps.map(|v| v as u32),
@@ -63,9 +61,8 @@ impl SqliteRepository {
                 file_path, 
                 content_hash, 
                 new_path, 
-                bytes_size, 
-                mime_type, 
-                created_at, 
+        bytes_size,
+        created_at,
                 modified_at, 
                 bitrate_kbps, 
                 duration_seconds, 
@@ -97,9 +94,8 @@ impl SqliteRepository {
                 file_path, 
                 content_hash, 
                 new_path, 
-                bytes_size, 
-                mime_type, 
-                created_at, 
+        bytes_size,
+        created_at,
                 modified_at, 
                 bitrate_kbps, 
                 duration_seconds, 
@@ -136,17 +132,16 @@ impl SqliteRepository {
         sqlx::query!(
             r#"
             INSERT INTO audio_assets (
-                id, filename, identifier, file_path, content_hash, 
-                new_path, bytes_size, mime_type, created_at, modified_at,
+                id, filename, identifier, file_path, content_hash,
+                new_path, bytes_size, created_at, modified_at,
                 bitrate_kbps, duration_seconds, sample_rate_hz, channels, codec
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(filename) DO UPDATE SET
                 identifier = excluded.identifier,
                 content_hash = excluded.content_hash,
                 new_path = excluded.new_path,
                 bytes_size = excluded.bytes_size,
-                mime_type = excluded.mime_type,
                 modified_at = excluded.modified_at,
                 bitrate_kbps = excluded.bitrate_kbps,
                 duration_seconds = excluded.duration_seconds,
@@ -161,7 +156,6 @@ impl SqliteRepository {
             meta.content_hash,
             new_path,
             bytes_size,
-            meta.mime_type,
             meta.created_at,
             meta.modified_at,
             bitrate_kbps,

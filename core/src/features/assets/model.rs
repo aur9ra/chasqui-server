@@ -14,7 +14,6 @@ pub struct CommonAssetMetadata {
     #[serde(skip_serializing)]
     pub new_path: Option<PathBuf>,
     pub bytes_size: u64,
-    pub mime_type: String,
     pub created_at: Option<NaiveDateTime>,
     pub modified_at: Option<NaiveDateTime>,
 }

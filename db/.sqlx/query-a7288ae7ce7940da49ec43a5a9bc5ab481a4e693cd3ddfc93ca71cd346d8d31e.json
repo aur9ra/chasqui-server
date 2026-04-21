@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO video_assets (\n                id, filename, identifier, file_path, content_hash,\n                new_path, bytes_size, created_at, modified_at,\n                duration_seconds, width, height, frame_rate, video_codec, audio_codec\n            )\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n            ON CONFLICT(filename) DO UPDATE SET\n                identifier = excluded.identifier,\n                content_hash = excluded.content_hash,\n                new_path = excluded.new_path,\n                bytes_size = excluded.bytes_size,\n                modified_at = excluded.modified_at,\n                duration_seconds = excluded.duration_seconds,\n                width = excluded.width,\n                height = excluded.height,\n                frame_rate = excluded.frame_rate,\n                video_codec = excluded.video_codec,\n                audio_codec = excluded.audio_codec\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 15
+    },
+    "nullable": []
+  },
+  "hash": "a7288ae7ce7940da49ec43a5a9bc5ab481a4e693cd3ddfc93ca71cd346d8d31e"
+}

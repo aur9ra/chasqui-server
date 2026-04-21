@@ -25,15 +25,6 @@ pub async fn create_audio_asset(
 
     let identifier = manifest.file_to_id.get(&filename).cloned();
 
-    let mime_type = match path.extension().and_then(|s| s.to_str()).map(|s| s.to_lowercase()).as_deref() {
-        Some("mp3") => "audio/mpeg",
-        Some("wav") => "audio/wav",
-        Some("ogg") => "audio/ogg",
-        Some("flac") => "audio/flac",
-        Some("m4a") => "audio/mp4",
-        _ => "application/octet-stream",
-    };
-
     let tech_meta = {
         let stream = reader.open_file(path).await?;
         extract_audio_metadata(stream)
@@ -47,9 +38,8 @@ pub async fn create_audio_asset(
             file_path: path.to_path_buf(),
             content_hash,
             new_path: None,
-            bytes_size,
-            mime_type: mime_type.to_string(),
-            created_at: metadata.created,
+        bytes_size,
+        created_at: metadata.created,
             modified_at: metadata.modified,
         },
         bitrate_kbps: tech_meta.bitrate_kbps,

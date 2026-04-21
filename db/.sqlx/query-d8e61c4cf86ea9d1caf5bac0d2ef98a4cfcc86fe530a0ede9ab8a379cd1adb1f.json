@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT \n                id as \"id: Uuid\", \n                filename, \n                identifier, \n                file_path, \n                content_hash, \n                new_path, \n                bytes_size, \n                mime_type, \n                created_at, \n                modified_at, \n                bitrate_kbps, \n                duration_seconds, \n                sample_rate_hz, \n                channels, \n                codec \n            FROM audio_assets \n            WHERE filename = ?\n            ",
+  "query": "\n            SELECT \n                id as \"id: Uuid\", \n                filename, \n                identifier, \n                file_path, \n                content_hash, \n                new_path, \n        bytes_size,\n        created_at,\n                modified_at, \n                bitrate_kbps, \n                duration_seconds, \n                sample_rate_hz, \n                channels, \n                codec \n            FROM audio_assets \n            WHERE filename = ?\n            ",
   "describe": {
     "columns": [
       {
@@ -39,43 +39,38 @@
         "type_info": "Integer"
       },
       {
-        "name": "mime_type",
-        "ordinal": 7,
-        "type_info": "Text"
-      },
-      {
         "name": "created_at",
-        "ordinal": 8,
+        "ordinal": 7,
         "type_info": "Datetime"
       },
       {
         "name": "modified_at",
-        "ordinal": 9,
+        "ordinal": 8,
         "type_info": "Datetime"
       },
       {
         "name": "bitrate_kbps",
-        "ordinal": 10,
+        "ordinal": 9,
         "type_info": "Integer"
       },
       {
         "name": "duration_seconds",
-        "ordinal": 11,
+        "ordinal": 10,
         "type_info": "Integer"
       },
       {
         "name": "sample_rate_hz",
-        "ordinal": 12,
+        "ordinal": 11,
         "type_info": "Integer"
       },
       {
         "name": "channels",
-        "ordinal": 13,
+        "ordinal": 12,
         "type_info": "Integer"
       },
       {
         "name": "codec",
-        "ordinal": 14,
+        "ordinal": 13,
         "type_info": "Text"
       }
     ],
@@ -90,7 +85,6 @@
       false,
       true,
       false,
-      false,
       true,
       true,
       true,
@@ -100,5 +94,5 @@
       true
     ]
   },
-  "hash": "aaac8d73e7c01b345744f614b02ae0ee8e4bb657d2a40ddda0cf93a12ccc35a4"
+  "hash": "d8e61c4cf86ea9d1caf5bac0d2ef98a4cfcc86fe530a0ede9ab8a379cd1adb1f"
 }

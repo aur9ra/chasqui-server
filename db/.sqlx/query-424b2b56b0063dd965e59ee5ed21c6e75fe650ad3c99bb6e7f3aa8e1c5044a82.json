@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO image_assets (\n            id, filename, identifier, file_path, content_hash,\n            new_path, bytes_size, created_at, modified_at,\n            width, height, alt_text\n        )\n        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n        ON CONFLICT(filename) DO UPDATE SET\n            identifier = excluded.identifier,\n            content_hash = excluded.content_hash,\n            new_path = excluded.new_path,\n            bytes_size = excluded.bytes_size,\n            modified_at = excluded.modified_at,\n            width = excluded.width,\n            height = excluded.height,\n            alt_text = excluded.alt_text\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 12
+    },
+    "nullable": []
+  },
+  "hash": "424b2b56b0063dd965e59ee5ed21c6e75fe650ad3c99bb6e7f3aa8e1c5044a82"
+}
